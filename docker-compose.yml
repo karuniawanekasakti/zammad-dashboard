@@ -1,0 +1,32 @@
+services:
+  api:
+    build: ./backend
+    ports:
+      - "8001:8001"
+    environment:
+      - ZAMMAD_BASE_URL=${ZAMMAD_BASE_URL:-https://support.example.com}
+      - ZAMMAD_API_TOKEN=${ZAMMAD_API_TOKEN:-}
+      - ZAMMAD_WEBHOOK_SECRET=${ZAMMAD_WEBHOOK_SECRET:-changeme}
+      - REDIS_URL=redis://redis:6379/0
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-dev-secret-change-in-production}
+      - CORS_ORIGINS=["http://localhost:5173","http://localhost:3000"]
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
+volumes:
+  redis_data:

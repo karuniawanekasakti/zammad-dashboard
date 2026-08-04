@@ -39,9 +39,12 @@ const STATE_TABS: { value: TicketState | "all"; label: string }[] = [
   { value: "closed", label: "Closed" },
 ];
 
+const EMPTY_TICKETS: Ticket[] = [];
+
 export default function TicketsPage() {
   const nav = useNavigate();
   const scope = useScope();
+  const scopeKey = `${scope.role}:${scope.user_id}:${scope.group_ids.join(",")}`;
   const [search, setSearch] = useState("");
   const [state, setState] = useState<TicketState | "all">("all");
   const [priority, setPriority] = useState<"all" | "low" | "normal" | "high" | "very high">("all");
@@ -49,12 +52,13 @@ export default function TicketsPage() {
   const [agentFilter, setAgentFilter] = useState<string>("all");
   const [page, setPage] = useState(1);
   const pageSize = 20;
-  const [sorting, setSorting] = useState<SortingState>([]);
+  const [sorting, setSorting] = useState<SortingState>([{ id: "zammad_updated_at", desc: true }]);
+  const updatedSort = sorting.find((s) => s.id === "zammad_updated_at");
 
   const groups = useQuery({ queryKey: ["groups-filter"], queryFn: () => api.listAllGroupsForFilter() });
   const agents = useQuery({ queryKey: ["agents-filter"], queryFn: () => api.listAllAgentsForFilter() });
   const tickets = useQuery({
-    queryKey: ["tickets", scope, search, state, priority, groupFilter, agentFilter, page],
+    queryKey: ["tickets", scopeKey, search, state, priority, groupFilter, agentFilter, page, updatedSort?.desc],
     queryFn: () =>
       api.listTickets(scope, {
         search,
@@ -64,6 +68,8 @@ export default function TicketsPage() {
         owner_id: agentFilter,
         page,
         page_size: pageSize,
+        sort_by: "updated",
+        sort_dir: updatedSort?.desc === false ? "asc" : "desc",
       }),
   });
 
@@ -118,7 +124,7 @@ export default function TicketsPage() {
         header: ({ column }) => (
           <button
             className="inline-flex items-center gap-1 hover:text-foreground"
-            onClick={() => column.toggleSorting()}
+            onClick={() => column.toggleSorting(column.getIsSorted() !== "desc")}
           >
             Updated
             <ArrowUpDown className="size-3" />
@@ -134,8 +140,9 @@ export default function TicketsPage() {
     []
   );
 
+  const rows = tickets.data?.rows ?? EMPTY_TICKETS;
   const table = useReactTable({
-    data: tickets.data?.rows ?? [],
+    data: rows,
     columns,
     state: { sorting },
     onSortingChange: setSorting,

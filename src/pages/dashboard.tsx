@@ -66,8 +66,9 @@ export default function DashboardPage() {
   const user = useAuth((s) => s.user)!;
   const scope = useScope();
 
-  const allGroups = useQuery({ queryKey: ["groups-filter"], queryFn: () => api.listAllGroupsForFilter() });
-  const allAgents = useQuery({ queryKey: ["agents-filter"], queryFn: () => api.listAllAgentsForFilter() });
+  const showFilters = user.role !== "agent";
+  const allGroups = useQuery({ queryKey: ["groups-filter"], queryFn: () => api.listAllGroupsForFilter(), enabled: showFilters });
+  const allAgents = useQuery({ queryKey: ["agents-filter"], queryFn: () => api.listAllAgentsForFilter(), enabled: showFilters });
 
   const [groupFilter, setGroupFilter] = useState("all");
   const [agentFilter, setAgentFilter] = useState("all");
@@ -85,8 +86,6 @@ export default function DashboardPage() {
     if (groupFilter === "all") return list;
     return list.filter((a) => a.group_ids.includes(groupFilter));
   }, [allAgents.data, groupFilter]);
-
-  const showFilters = user.role !== "agent";
 
   return (
     <div className="space-y-6">

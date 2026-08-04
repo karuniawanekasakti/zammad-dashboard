@@ -1,6 +1,8 @@
 """Async Zammad REST API client."""
 from __future__ import annotations
 import httpx
+from fastapi import HTTPException, status
+
 from app.config import settings
 
 
@@ -17,10 +19,16 @@ class ZammadClient:
 
     async def authenticate(self, login: str, password: str) -> dict | None:
         """Validate credentials against Zammad and return user data."""
-        async with httpx.AsyncClient(base_url=self._base, timeout=15) as c:
-            r = await c.get("/api/v1/users/me", auth=(login, password))
-            if r.status_code == 200:
-                return r.json()
+        try:
+            async with httpx.AsyncClient(base_url=self._base, timeout=15) as c:
+                r = await c.get("/api/v1/users/me", auth=(login, password))
+        except httpx.RequestError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Cannot reach Zammad at {self._base}: {exc}",
+            ) from exc
+        if r.status_code == 200:
+            return r.json()
         return None
 
     async def get_tickets(self, page: int = 1, per_page: int = 50, updated_since: str | None = None) -> list[dict]:
@@ -31,6 +39,24 @@ class ZammadClient:
             r = await c.get("/api/v1/tickets", params=params)
             r.raise_for_status()
             return r.json()
+
+    async def get_all_tickets(self, per_page: int = 100, updated_since: str | None = None, max_pages: int = 1000) -> list[dict]:
+        tickets: list[dict] = []
+        async with self._client() as c:
+            for page in range(1, max_pages + 1):
+                params: dict = {"page": page, "per_page": per_page, "expand": "true"}
+                if updated_since:
+                    params["query"] = f"updated_at:>{updated_since}"
+                r = await c.get("/api/v1/tickets", params=params)
+                r.raise_for_status()
+                rows = r.json()
+                tickets.extend(rows)
+
+                total_pages = r.headers.get("x-total-pages")
+                if not rows or len(rows) < per_page or (total_pages and page >= int(total_pages)):
+                    return tickets
+
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Zammad ticket pagination exceeded max_pages")
 
     async def get_ticket(self, ticket_id: int) -> dict:
         async with self._client() as c:

@@ -13,7 +13,7 @@ router = APIRouter()
 
 def _map_role(zammad_user: dict) -> Role:
     """Map Zammad roles/tags to internal role."""
-    roles = [r.lower() for r in zammad_user.get("roles", [])]
+    roles = [r.lower() if isinstance(r, str) else str(r.get("name", "")).lower() for r in zammad_user.get("roles") or []]
     if "admin" in roles:
         return Role.admin
     # Check for custom tag-based roles
@@ -22,11 +22,15 @@ def _map_role(zammad_user: dict) -> Role:
         return Role.team_lead
     if "project_manager" in note:
         return Role.project_manager
+    group_perms = zammad_user.get("group_ids") or {}
+    if isinstance(group_perms, dict) and any("full" in perms for perms in group_perms.values()):
+        return Role.team_lead
     return Role.agent
 
 
 def _map_user(z: dict, role: Role) -> UserOut:
-    group_ids = [str(g) for g in (z.get("group_ids") or z.get("groups", {}).keys() or [])]
+    raw_groups = z.get("group_ids") or z.get("groups", {})
+    group_ids = [str(g) for g in (raw_groups.keys() if isinstance(raw_groups, dict) else raw_groups or [])]
     return UserOut(
         id=str(z["id"]),
         zammad_id=z["id"],

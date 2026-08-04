@@ -2,7 +2,7 @@ services:
   api:
     build: ./backend
     ports:
-      - "8001:8001"
+      - "8000:8000"
     environment:
       - ZAMMAD_BASE_URL=${ZAMMAD_BASE_URL:-https://support.example.com}
       - ZAMMAD_API_TOKEN=${ZAMMAD_API_TOKEN:-}

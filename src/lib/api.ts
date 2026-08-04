@@ -49,6 +49,8 @@ export interface TicketFilters {
   owner_id?: string | "all";
   page?: number;
   page_size?: number;
+  sort_by?: string;
+  sort_dir?: "asc" | "desc";
 }
 
 export interface Scope {

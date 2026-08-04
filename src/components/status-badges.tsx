@@ -11,7 +11,7 @@ const STATE_MAP: Record<TicketState, { label: string; className: string }> = {
 };
 
 export function StateBadge({ state, className }: { state: TicketState; className?: string }) {
-  const m = STATE_MAP[state];
+  const m = STATE_MAP[state] ?? { label: String(state || "Unknown"), className: "bg-muted text-muted-foreground" };
   return (
     <Badge variant="outline" className={cn("font-medium", m.className, className)}>
       {m.label}
@@ -30,7 +30,7 @@ const PRIORITY_MAP: Record<TicketPriority, { label: string; className: string }>
 };
 
 export function PriorityBadge({ priority, className }: { priority: TicketPriority; className?: string }) {
-  const m = PRIORITY_MAP[priority];
+  const m = PRIORITY_MAP[priority] ?? { label: String(priority || "Unknown"), className: "bg-muted text-muted-foreground" };
   return (
     <Badge variant="outline" className={cn("font-medium", m.className, className)}>
       {m.label}

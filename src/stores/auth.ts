@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { User } from "@/types";
@@ -27,9 +28,8 @@ export const useAuth = create<AuthState>()(
 
 export function useScope() {
   const user = useAuth((s) => s.user);
-  return {
-    role: user?.role ?? "agent",
-    group_ids: user?.group_ids ?? [],
-    user_id: user?.id ?? "",
-  } as const;
+  return useMemo(
+    () => ({ role: user?.role ?? "agent", group_ids: user?.group_ids ?? [], user_id: user?.id ?? "" }) as const,
+    [user?.role, user?.group_ids, user?.id]
+  );
 }

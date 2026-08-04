@@ -17,7 +17,7 @@ const MAP: Record<SlaStatus, { variant: "success" | "warning" | "destructive" | 
 };
 
 export function SlaBadge({ status, remainingSecs, compact, className }: Props) {
-  const meta = MAP[status];
+  const meta = MAP[status] ?? { variant: "secondary" as const, label: String(status || "Unknown"), dot: "bg-muted-foreground" };
   const timeText =
     remainingSecs == null
       ? null

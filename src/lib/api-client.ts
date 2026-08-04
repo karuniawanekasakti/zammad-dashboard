@@ -7,6 +7,7 @@ import type {
   AlertRule,
   ChannelConfig,
   Group,
+  GroupStat,
   KpiSummary,
   NotificationEvent,
   ReportExport,
@@ -17,6 +18,7 @@ import type {
   User,
 } from "@/types";
 import type { Scope, TicketFilters } from "@/lib/api";
+import { useAuth } from "@/stores/auth";
 
 const BASE = import.meta.env.VITE_API_BASE ?? "/api/v1";
 
@@ -31,7 +33,7 @@ function getToken(): string | null {
   }
 }
 
-async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
+async function requestRaw<T>(path: string, opts: RequestInit = {}): Promise<{ data: T; meta?: { total?: number } }> {
   const token = getToken();
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -40,14 +42,17 @@ async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
   };
   const res = await fetch(`${BASE}${path}`, { ...opts, headers });
   if (res.status === 401) {
-    localStorage.removeItem("zm-auth");
+    useAuth.getState().logout();
     window.location.href = "/login";
     throw new Error("Unauthorized");
   }
   if (!res.ok) throw new Error(`API error ${res.status}`);
   const json = await res.json();
-  // Backend wraps in { success, data, meta }
-  return json.data !== undefined ? json.data : json;
+  return json.data !== undefined ? json : { data: json };
+}
+
+async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
+  return (await requestRaw<T>(path, opts)).data;
 }
 
 function qs(params: Record<string, unknown>): string {
@@ -69,11 +74,8 @@ export const apiClient = {
     });
     if (!res.ok) throw new Error("Invalid credentials");
     const json = await res.json();
-    // Store token
-    const store = JSON.parse(localStorage.getItem("zm-auth") || '{"state":{}}');
-    store.state.token = json.token;
-    store.state.user = json.user;
-    localStorage.setItem("zm-auth", JSON.stringify(store));
+    useAuth.getState().setToken(json.token);
+    useAuth.getState().setUser(json.user);
     return json.user;
   },
 
@@ -94,10 +96,11 @@ export const apiClient = {
       group_id: filters.group_id,
       owner_id: filters.owner_id,
       search: filters.search,
+      sort_by: filters.sort_by,
+      sort_dir: filters.sort_dir,
     });
-    const data = await request<Ticket[]>(`/tickets${params}`);
-    // Backend returns paginated in meta, but we get data array
-    return { rows: data, total: data.length };
+    const res = await requestRaw<Ticket[]>(`/tickets${params}`);
+    return { rows: res.data, total: res.meta?.total ?? res.data.length };
   },
 
   async getTicket(id: string): Promise<{ ticket: Ticket; articles: TicketArticle[] } | null> {
@@ -122,11 +125,11 @@ export const apiClient = {
   },
 
   async resolutionTimeTrend(days = 14): Promise<TrendPoint[]> {
-    return request<TrendPoint[]>(`/kpi/volume?days=${days}`);
+    return request<TrendPoint[]>(`/kpi/resolution-time?days=${days}`);
   },
 
   async firstReplyTrend(days = 14): Promise<TrendPoint[]> {
-    return request<TrendPoint[]>(`/kpi/volume?days=${days}`);
+    return request<TrendPoint[]>(`/kpi/first-reply?days=${days}`);
   },
 
   // Agents
@@ -139,21 +142,20 @@ export const apiClient = {
   },
 
   // Groups
-  async listGroups(_scope: Scope): Promise<any[]> {
-    return request("/groups");
+  async listGroups(_scope: Scope): Promise<GroupStat[]> {
+    return request<GroupStat[]>("/groups");
   },
 
-  async getGroup(id: string): Promise<any | null> {
-    return request(`/groups/${id}/stats`);
+  async getGroup(id: string): Promise<GroupStat | null> {
+    return request<GroupStat | null>(`/groups/${id}/stats`);
   },
 
   async listAllGroupsForFilter(): Promise<Group[]> {
-    return request<Group[]>("/groups");
+    return request<Group[]>("/groups?summary=true");
   },
 
   async listAllAgentsForFilter(): Promise<User[]> {
-    const stats: AgentStat[] = await request("/agents");
-    return stats.map((s) => s.agent);
+    return request<User[]>("/agents?summary=true");
   },
 
   // Alerts

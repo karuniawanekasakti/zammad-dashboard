@@ -128,6 +128,17 @@ class GroupOut(BaseModel):
     agent_count: int = 0
 
 
+class GroupStat(BaseModel):
+    group: GroupOut
+    open_tickets: int = 0
+    new_today: int = 0
+    closed_today: int = 0
+    sla_breach_rate: float = 0.0
+    avg_first_reply_secs: int = 0
+    avg_resolution_secs: int = 0
+    trend: list[TrendPoint] = []
+
+
 # --- Agents ---
 class AgentStat(BaseModel):
     agent: UserOut

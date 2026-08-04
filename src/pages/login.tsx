@@ -40,8 +40,10 @@ export default function LoginPage() {
   const onSubmit = async (values: FormValues) => {
     try {
       const u = await api.login(values.login, values.password);
-      setUser(u);
-      setToken(`mock-jwt-${u.id}`);
+      if (import.meta.env.VITE_USE_BACKEND !== "true") {
+        setToken(`mock-jwt-${u.id}`);
+        setUser(u);
+      }
       toast.success(`Welcome, ${u.firstname}!`);
       nav("/dashboard");
     } catch (err) {

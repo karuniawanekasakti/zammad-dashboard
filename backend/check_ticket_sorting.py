@@ -41,9 +41,10 @@ async def main() -> None:
 
     tickets.cache_get = miss
     tickets.cache_set = noop
+    tickets.upsert_tickets = noop
     tickets.zammad = FakeZammad()
 
-    res = await tickets.list_tickets(current={"sub": "1", "role": "admin", "group_ids": []}, page=1, per_page=1)
+    res = await tickets.list_tickets(current={"sub": "1", "role": "admin", "group_ids": []}, db=object(), page=1, per_page=1)
     assert res.meta["total"] == 3
     assert res.data[0]["id"] == "2"
 

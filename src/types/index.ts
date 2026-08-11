@@ -80,6 +80,25 @@ export interface TrendPoint {
   secondary?: number;
 }
 
+export type OverviewPeriod = "year" | "month" | "week" | "day";
+
+export interface OverviewPoint {
+  label: string;
+  created: number;
+  closed: number;
+  reopened: number;
+  backlog: number;
+}
+
+export interface OverviewData {
+  chart: OverviewPoint[];
+  totals: { created: number; closed: number; reopened: number; backlog: number };
+  tickets: Ticket[];
+  total: number;
+  groups: string[];
+  agents: string[];
+}
+
 export interface AgentStat {
   agent: User;
   open_tickets: number;
@@ -174,6 +193,45 @@ export interface ReportExport {
   created_at: string;
   completed_at: string | null;
   expires_at: string | null;
+}
+
+export interface SyncSchedules {
+  incremental_seconds: number;
+  full_reconcile_seconds: number;
+}
+
+export interface SyncLastRun {
+  kind: "incremental" | "full";
+  triggered_by: string;
+  tickets: number;
+  users: number;
+  groups: number;
+  duration_secs: number;
+  started_at: string;
+  finished_at: string;
+  status: "ok" | "error";
+}
+
+export interface WorkerStatus {
+  reachable: boolean;
+  workers: Record<string, string>[];
+  error?: string;
+}
+
+export interface SettingsBundle {
+  schedules: SyncSchedules;
+  last_run: SyncLastRun | null;
+  worker: WorkerStatus;
+  health: { redis: string; database: string; zammad: string };
+  zammad_base_url: string;
+  data_retention_days: number;
+}
+
+export interface SettingsStatus {
+  worker: WorkerStatus;
+  health: { redis: string; database: string; zammad: string };
+  last_run: SyncLastRun | null;
+  now: string;
 }
 
 export interface SystemSettings {

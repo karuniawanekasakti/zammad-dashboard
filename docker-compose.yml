@@ -1,18 +1,61 @@
+x-backend-env: &backend-env
+  environment:
+    - ZAMMAD_BASE_URL=${ZAMMAD_BASE_URL:-https://support.example.com}
+    - ZAMMAD_API_TOKEN=${ZAMMAD_API_TOKEN:-}
+    - ZAMMAD_WEBHOOK_SECRET=${ZAMMAD_WEBHOOK_SECRET:-changeme}
+    - REDIS_URL=redis://redis:6379/0
+    - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/zammad_dashboard
+    - JWT_SECRET_KEY=${JWT_SECRET_KEY:-dev-secret-change-in-production}
+    - CORS_ORIGINS=["http://localhost:5173","http://localhost:3000"]
+
 services:
   api:
     build: ./backend
+    <<: *backend-env
     ports:
       - "8000:8000"
-    environment:
-      - ZAMMAD_BASE_URL=${ZAMMAD_BASE_URL:-https://support.example.com}
-      - ZAMMAD_API_TOKEN=${ZAMMAD_API_TOKEN:-}
-      - ZAMMAD_WEBHOOK_SECRET=${ZAMMAD_WEBHOOK_SECRET:-changeme}
-      - REDIS_URL=redis://redis:6379/0
-      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-dev-secret-change-in-production}
-      - CORS_ORIGINS=["http://localhost:5173","http://localhost:3000"]
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  worker:
+    build: ./backend
+    <<: *backend-env
+    command: celery -A app.celery_app:celery worker -Q sync --concurrency=2 --loglevel=info
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  beat:
+    build: ./backend
+    <<: *backend-env
+    command: celery -A app.celery_app:celery beat --loglevel=info
     depends_on:
       redis:
         condition: service_healthy
+    restart: unless-stopped
+
+  db:
+    image: postgres:15-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=zammad_dashboard
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d zammad_dashboard"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
 
   redis:
@@ -29,4 +72,5 @@ services:
     restart: unless-stopped
 
 volumes:
+  postgres_data:
   redis_data:

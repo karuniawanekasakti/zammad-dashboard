@@ -23,6 +23,7 @@ interface NavItem {
 
 const NAV: NavItem[] = [
   { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { to: "/overview", label: "Overview", icon: TrendingUp },
   { to: "/tickets", label: "Tickets", icon: Ticket },
   { to: "/agents", label: "Agents", icon: Users, roles: ["admin", "team_lead"] },
   { to: "/groups", label: "Groups", icon: UsersRound, roles: ["admin", "team_lead", "project_manager"] },
@@ -70,7 +71,7 @@ export function Sidebar({ role, collapsed }: { role: Role; collapsed: boolean })
         ))}
       </nav>
       <div className="p-3 border-t border-sidebar-border text-[11px] text-sidebar-foreground/60">
-        {!collapsed && <>v0.1.0 · mock mode</>}
+        {!collapsed && <>v0.1.0</>}
       </div>
     </aside>
   );

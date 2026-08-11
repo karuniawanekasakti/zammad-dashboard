@@ -1,22 +1,19 @@
-"""Group endpoints."""
-from collections import Counter, defaultdict
+"""Group endpoints. Reads from PostgreSQL (synced by Celery workers)."""
+from collections import defaultdict
 from datetime import date, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.cache import cache_get, cache_set
-from app.deps import get_current_user
-from app.models import ApiResponse, GroupOut, GroupStat, TicketOut, TrendPoint
-from app.routers.tickets import OPEN_STATES, _fetch_scoped
-from app.zammad_client import zammad
+from app.db_models import GroupRow
+from app.deps import get_current_user, get_db
+from app.models import ApiResponse, GroupOut, GroupStat, TicketOut, TrendPoint, UserOut
+from app.repositories import list_groups as list_group_rows, list_tickets, list_users
+from app.routers.tickets import OPEN_STATES
 
 router = APIRouter()
-
-
-def _group_ids(z: dict) -> list[str]:
-    raw = z.get("group_ids") or z.get("groups", {})
-    return [str(g) for g in (raw.keys() if isinstance(raw, dict) else raw or [])]
 
 
 def _avg(values: list[int | None]) -> int:
@@ -69,30 +66,41 @@ def _visible_group(group_id: str, current: dict) -> bool:
     return current["role"] == "admin" or group_id in current.get("group_ids", [])
 
 
-async def _group_stats(current: dict) -> list[GroupStat]:
+async def _fetch_scoped_tickets(current: dict, db: AsyncSession) -> list[TicketOut]:
+    from app.routers.tickets import _row_to_ticket, _scope_filter
+
+    tickets = [_row_to_ticket(row) for row in await list_tickets(db)]
+    return _scope_filter(tickets, current)
+
+
+async def _group_stats(current: dict, db: AsyncSession) -> list[GroupStat]:
     cache_key = f"groups:stats:{current['sub']}:{current['role']}:{','.join(current.get('group_ids', []))}"
     cached = await cache_get(cache_key)
     if cached:
         return [GroupStat(**g) for g in cached]
 
-    raw_groups = [g for g in await zammad.get_groups() if _visible_group(str(g["id"]), current)]
-    users = await zammad.get_users(per_page=200)
-    agent_counts = Counter(g for user in users for g in _group_ids(user))
-    tickets = await _fetch_scoped(current)
-    stats = [_group_stat(_map_group(g, agent_counts[str(g["id"])]), tickets) for g in raw_groups]
+    rows = [g for g in await list_group_rows(db) if _visible_group(g.id, current)]
+    users = [UserOut.model_validate(u, from_attributes=True) for u in await list_users(db)]
+    agent_counts = defaultdict(int)
+    for u in users:
+        for gid in u.group_ids:
+            agent_counts[gid] += 1
+    groups = [_map_group({"id": g.id, "name": g.name, "note": g.note, "active": g.active}, agent_counts.get(g.id, g.agent_count)) for g in rows]
+    tickets = await _fetch_scoped_tickets(current, db)
+    stats = [_group_stat(group, tickets) for group in groups]
     await cache_set(cache_key, [s.model_dump(mode="json") for s in stats], ttl=60)
     return stats
 
 
 @router.get("", response_model=ApiResponse)
-async def list_groups(current: Annotated[dict, Depends(get_current_user)], summary: bool = Query(False)):
-    stats = await _group_stats(current)
+async def list_groups(current: Annotated[dict, Depends(get_current_user)], db: Annotated[AsyncSession, Depends(get_db)], summary: bool = Query(False)):
+    stats = await _group_stats(current, db)
     if summary:
         return ApiResponse(data=[s.group.model_dump(mode="json") for s in stats])
     return ApiResponse(data=[s.model_dump(mode="json") for s in stats])
 
 
 @router.get("/{group_id}/stats", response_model=ApiResponse)
-async def group_stats(group_id: str, current: Annotated[dict, Depends(get_current_user)]):
-    stat = next((s for s in await _group_stats(current) if s.group.id == group_id), None)
+async def group_stats(group_id: str, current: Annotated[dict, Depends(get_current_user)], db: Annotated[AsyncSession, Depends(get_db)]):
+    stat = next((s for s in await _group_stats(current, db) if s.group.id == group_id), None)
     return ApiResponse(data=stat.model_dump(mode="json") if stat else None)

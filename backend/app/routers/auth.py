@@ -2,10 +2,12 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.cache import cache_set
-from app.deps import create_token, get_current_user
+from app.deps import create_token, get_current_user, get_db
 from app.models import LoginRequest, Role, TokenResponse, UserOut
+from app.repositories import upsert_user
 from app.zammad_client import zammad
 
 router = APIRouter()
@@ -45,7 +47,7 @@ def _map_user(z: dict, role: Role) -> UserOut:
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(body: LoginRequest):
+async def login(body: LoginRequest, db: Annotated[AsyncSession, Depends(get_db)]):
     zammad_user = await zammad.authenticate(body.login, body.password)
     if not zammad_user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
@@ -53,8 +55,9 @@ async def login(body: LoginRequest):
     role = _map_role(zammad_user)
     user = _map_user(zammad_user, role)
     token = create_token(user.id, role, user.group_ids)
+    await upsert_user(db, user)
 
-    # Cache user data
+    # Redis remains a hot cache only.
     await cache_set(f"user:{user.id}", user.model_dump(mode="json"), ttl=3600)
 
     return TokenResponse(token=token, user=user)

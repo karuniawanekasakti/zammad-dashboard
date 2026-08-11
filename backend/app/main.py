@@ -1,12 +1,22 @@
+from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.routers import auth, tickets, agents, groups, kpi, alerts, notifications, channels, webhooks, system, ws
+from app.db import dispose_engine
+from app.routers import auth, tickets, agents, groups, kpi, alerts, notifications, channels, webhooks, system, settings as settings_router, ws
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    yield
+    await dispose_engine()
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="Zammad Monitor API", version="0.1.0", root_path="/api/v1")
+    app = FastAPI(title="Zammad Monitor API", version="0.1.0", root_path="/api/v1", lifespan=lifespan)
 
     app.add_middleware(
         CORSMiddleware,
@@ -26,6 +36,7 @@ def create_app() -> FastAPI:
     app.include_router(channels.router, prefix="/channels", tags=["channels"])
     app.include_router(webhooks.router, prefix="/webhooks", tags=["webhooks"])
     app.include_router(system.router, prefix="/system", tags=["system"])
+    app.include_router(settings_router.router, prefix="/settings", tags=["settings"])
     app.include_router(ws.router, tags=["websocket"])
 
     return app

@@ -1,14 +1,17 @@
-"""Agent endpoints."""
+"""Agent endpoints. Reads from PostgreSQL (synced by Celery workers)."""
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.cache import cache_get, cache_set
-from app.deps import get_current_user, require_roles
-from app.models import AgentStat, ApiResponse, Role, TicketOut, UserOut
-from app.routers.tickets import OPEN_STATES, _fetch_scoped
-from app.zammad_client import zammad
+from app.db_models import UserRow
+from app.deps import get_current_user, get_db
+from app.models import AgentStat, ApiResponse, TicketOut, UserOut
+from app.repositories import list_tickets, list_users
+from app.routers.auth import _map_role
+from app.routers.tickets import OPEN_STATES
 
 router = APIRouter()
 
@@ -19,16 +22,14 @@ def _group_ids(z: dict) -> list[str]:
 
 
 def _map_agent(z: dict) -> UserOut:
-    roles = [r.lower() if isinstance(r, str) else str(r.get("name", "")).lower() for r in z.get("roles") or []]
-    role = Role.admin if "admin" in roles else Role.agent
     return UserOut(
         id=str(z["id"]),
         zammad_id=z["id"],
-        email=z.get("email", ""),
-        firstname=z.get("firstname", ""),
-        lastname=z.get("lastname", ""),
-        login=z.get("login", ""),
-        role=role,
+        email=z.get("email") or "",
+        firstname=z.get("firstname") or "",
+        lastname=z.get("lastname") or "",
+        login=z.get("login") or "",
+        role=_map_role(z),
         group_ids=_group_ids(z),
         is_active=z.get("active", True),
     )
@@ -58,30 +59,43 @@ def _agent_stat(agent: UserOut, tickets: list[TicketOut]) -> AgentStat:
     )
 
 
-def _visible_agent(raw: dict, current: dict) -> bool:
+def _visible_agent(agent: UserOut, current: dict) -> bool:
     if current["role"] == "admin":
         return True
     groups = set(current.get("group_ids", []))
-    return bool(groups.intersection(_group_ids(raw)))
+    return bool(groups.intersection(agent.group_ids))
 
 
 @router.get("", response_model=ApiResponse)
-async def list_agents(current: Annotated[dict, Depends(require_roles(Role.admin, Role.team_lead))], summary: bool = Query(False)):
+async def list_agents(current: Annotated[dict, Depends(get_current_user)], db: Annotated[AsyncSession, Depends(get_db)], summary: bool = Query(False)):
+    if not summary and current["role"] not in {"admin", "team_lead"}:
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
     cache_key = f"agents:stats:{current['sub']}:{','.join(current.get('group_ids', []))}"
     cached = await cache_get(cache_key)
     if cached:
         stats = cached
     else:
-        raw_users = [u for u in await zammad.get_users(per_page=200) if u.get("active", True) and _visible_agent(u, current)]
-        tickets = await _fetch_scoped(current)
-        stats = [_agent_stat(_map_agent(u), tickets).model_dump(mode="json") for u in raw_users]
+        agents = [UserOut.model_validate(u, from_attributes=True) for u in await list_users(db)]
+        agents = [a for a in agents if a.is_active and _visible_agent(a, current)]
+        tickets = await _fetch_scoped(current, db)
+        stats = [_agent_stat(agent, tickets).model_dump(mode="json") for agent in agents]
         await cache_set(cache_key, stats, ttl=300)
     return ApiResponse(data=[s["agent"] for s in stats] if summary else stats)
 
 
 @router.get("/{agent_id}", response_model=ApiResponse)
-async def get_agent(agent_id: int, current: Annotated[dict, Depends(get_current_user)]):
-    raw = await zammad.get_user(agent_id)
-    agent = _map_agent(raw)
-    tickets = await _fetch_scoped(current)
+async def get_agent(agent_id: int, current: Annotated[dict, Depends(get_current_user)], db: Annotated[AsyncSession, Depends(get_db)]):
+    row = await db.get(UserRow, str(agent_id))
+    if row is None:
+        return ApiResponse(data=None)
+    agent = UserOut.model_validate(row, from_attributes=True)
+    tickets = await _fetch_scoped(current, db)
     return ApiResponse(data=_agent_stat(agent, tickets).model_dump(mode="json"))
+
+
+async def _fetch_scoped(current: dict, db: AsyncSession) -> list[TicketOut]:
+    """Read tickets visible to the current user from PostgreSQL."""
+    from app.routers.tickets import _row_to_ticket, _scope_filter
+
+    tickets = [_row_to_ticket(row) for row in await list_tickets(db)]
+    return _scope_filter(tickets, current)

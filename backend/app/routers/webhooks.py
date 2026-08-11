@@ -38,6 +38,16 @@ async def receive_zammad_webhook(request: Request):
     await cache_delete(f"ticket:{ticket_id}")
     await cache_delete("kpi:*")
 
+    # Queue a worker to upsert the fresh ticket + articles into Postgres.
+    # Guarded: a down broker must not break the webhook receiver.
+    if ticket_id:
+        try:
+            from app.tasks import sync_ticket
+
+            sync_ticket.delay(int(ticket_id))
+        except Exception:
+            pass
+
     # Publish to WebSocket rooms
     msg = {
         "type": event_type,

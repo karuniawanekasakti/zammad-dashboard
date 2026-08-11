@@ -3,6 +3,7 @@ import { AppLayout } from "@/components/layout/app-layout";
 import { RequireAuth } from "@/components/require-auth";
 import LoginPage from "@/pages/login";
 import DashboardPage from "@/pages/dashboard";
+import OverviewPage from "@/pages/overview";
 import TicketsPage from "@/pages/tickets";
 import TicketDetailPage from "@/pages/ticket-detail";
 import AgentsPage from "@/pages/agents";
@@ -23,6 +24,7 @@ export default function App() {
       <Route element={<RequireAuth><AppLayout /></RequireAuth>}>
         <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="/dashboard" element={<DashboardPage />} />
+        <Route path="/overview" element={<OverviewPage />} />
         <Route path="/tickets" element={<TicketsPage />} />
         <Route path="/tickets/:id" element={<TicketDetailPage />} />
         <Route path="/agents" element={<RequireAuth roles={["admin", "team_lead"]}><AgentsPage /></RequireAuth>} />

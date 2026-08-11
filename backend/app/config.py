@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     zammad_api_token: str = ""
     zammad_webhook_secret: str = "changeme"
     redis_url: str = "redis://redis:6379/0"
+    database_url: str = "postgresql+asyncpg://postgres:postgres@db:5432/zammad_dashboard"
     jwt_secret_key: str = "changeme-256bit-secret"
     jwt_expiry_hours: int = 8
     cors_origins: list[str] = ["http://localhost:5173"]

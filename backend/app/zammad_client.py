@@ -21,7 +21,9 @@ class ZammadClient:
         """Validate credentials against Zammad and return user data."""
         try:
             async with httpx.AsyncClient(base_url=self._base, timeout=15) as c:
-                r = await c.get("/api/v1/users/me", auth=(login, password))
+                # expand=true so `roles` is populated; without it Zammad returns roles: None
+                # and _map_role would fall through to the group-permission heuristic.
+                r = await c.get("/api/v1/users/me?expand=true", auth=(login, password))
         except httpx.RequestError as exc:
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,

@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { useMemo, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ArrowLeft, Lock, Mail, MessageSquare, Phone, RotateCcw, Tag } from "lucide-react";
 import { format, formatDistanceToNow } from "date-fns";
@@ -88,7 +89,7 @@ export default function TicketDetailPage() {
                         <span>{format(new Date(a.created_at), "PPp")}</span>
                       </div>
                     </div>
-                    <div className="text-sm leading-relaxed whitespace-pre-line">{a.body}</div>
+                    <ArticleBody body={a.body} />
                   </div>
                 );
               })}
@@ -155,7 +156,85 @@ export default function TicketDetailPage() {
   );
 }
 
-function Info({ label, value }: { label: string; value: React.ReactNode }) {
+function ArticleBody({ body }: { body: string }) {
+  const content = useMemo(() => parseArticleBody(body), [body]);
+
+  return <div className="text-sm leading-relaxed space-y-2 break-words">{content}</div>;
+}
+
+function parseArticleBody(body: string): ReactNode[] {
+  if (typeof DOMParser === "undefined") return [body];
+
+  const doc = new DOMParser().parseFromString(body, "text/html");
+  return Array.from(doc.body.childNodes).map((node, index) => renderArticleNode(node, `${index}`));
+}
+
+function renderArticleNode(node: ChildNode, key: string): ReactNode {
+  if (node.nodeType === Node.TEXT_NODE) return node.textContent;
+  if (node.nodeType !== Node.ELEMENT_NODE) return null;
+
+  const element = node as HTMLElement;
+  const children = Array.from(element.childNodes).map((child, index) => renderArticleNode(child, `${key}-${index}`));
+
+  switch (element.tagName.toLowerCase()) {
+    case "br":
+      return <br key={key} />;
+    case "p":
+      return <p key={key}>{children}</p>;
+    case "div":
+    case "section":
+    case "article":
+      return <div key={key}>{children}</div>;
+    case "blockquote":
+      return <blockquote key={key} className="border-l-2 pl-3 italic text-muted-foreground">{children}</blockquote>;
+    case "ul":
+      return <ul key={key} className="list-disc pl-5 space-y-1">{children}</ul>;
+    case "ol":
+      return <ol key={key} className="list-decimal pl-5 space-y-1">{children}</ol>;
+    case "li":
+      return <li key={key}>{children}</li>;
+    case "a": {
+      const href = readableHref(element.getAttribute("href"));
+      return href ? (
+        <a key={key} href={href} target="_blank" rel="noreferrer" className="text-primary underline underline-offset-2">
+          {children}
+        </a>
+      ) : (
+        <span key={key}>{children}</span>
+      );
+    }
+    case "strong":
+    case "b":
+      return <strong key={key}>{children}</strong>;
+    case "em":
+    case "i":
+      return <em key={key}>{children}</em>;
+    case "code":
+      return <code key={key} className="rounded bg-muted px-1 py-0.5 text-xs">{children}</code>;
+    case "pre":
+      return <pre key={key} className="overflow-x-auto rounded bg-muted p-2 text-xs whitespace-pre-wrap">{element.textContent}</pre>;
+    case "img":
+      return element.getAttribute("alt") ? <span key={key}>[image: {element.getAttribute("alt")}]</span> : null;
+    case "script":
+    case "style":
+      return null;
+    default:
+      return <span key={key}>{children}</span>;
+  }
+}
+
+function readableHref(href: string | null) {
+  if (!href) return null;
+
+  try {
+    const url = new URL(href, window.location.origin);
+    return ["http:", "https:", "mailto:", "tel:"].includes(url.protocol) ? href : null;
+  } catch {
+    return null;
+  }
+}
+
+function Info({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className="flex items-center justify-between gap-2 border-b pb-2 last:border-b-0 last:pb-0">
       <span className="text-muted-foreground text-xs uppercase tracking-wide">{label}</span>

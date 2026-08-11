@@ -7,6 +7,8 @@ import type {
   KpiSummary,
   NotificationEvent,
   ReportExport,
+  SyncLastRun,
+  SyncSchedules,
   SystemSettings,
   Ticket,
   TicketArticle,
@@ -580,7 +582,6 @@ export let reportExports: ReportExport[] = [
   },
 ];
 
-// -- System settings ---------------------------------------------------------
 export const systemSettings: SystemSettings = {
   zammad_base_url: "https://support.acme.com",
   zammad_api_token_preview: "zma_••••••••••••4f7a",
@@ -592,6 +593,21 @@ export const systemSettings: SystemSettings = {
   last_sync_at: new Date(Date.now() - 2 * 60 * 1000).toISOString(),
   last_full_sync_at: new Date(Date.now() - 4 * 3600 * 1000).toISOString(),
   zammad_online: true,
+};
+
+export const mockSettings = {
+  schedules: { incremental_seconds: 300, full_reconcile_seconds: 21600 } as SyncSchedules,
+  last_run: {
+    kind: "incremental",
+    triggered_by: "beat",
+    tickets: 12,
+    users: 0,
+    groups: 0,
+    duration_secs: 4.1,
+    started_at: new Date(Date.now() - 150000).toISOString(),
+    finished_at: new Date().toISOString(),
+    status: "ok",
+  } as SyncLastRun,
 };
 
 // -- Exposed mutation helpers (for mock write ops) ---------------------------

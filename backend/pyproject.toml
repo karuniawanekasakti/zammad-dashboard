@@ -16,3 +16,7 @@ python-jose = {version = "==3.3.0", extras = ["cryptography"]}
 passlib = {version = "==1.7.4", extras = ["bcrypt"]}
 pydantic = "==2.9.2"
 pydantic-settings = "==2.5.2"
+sqlalchemy = "==2.0.36"
+asyncpg = "==0.29.0"
+alembic = "==1.13.3"
+celery = {version = "==5.4.0", extras = ["redis"]}

@@ -10,7 +10,12 @@ import type {
   GroupStat,
   KpiSummary,
   NotificationEvent,
+  OverviewData,
+  OverviewPeriod,
   ReportExport,
+  SettingsBundle,
+  SettingsStatus,
+  SyncSchedules,
   SystemSettings,
   Ticket,
   TicketArticle,
@@ -98,6 +103,8 @@ export const apiClient = {
       search: filters.search,
       sort_by: filters.sort_by,
       sort_dir: filters.sort_dir,
+      filters: filters.filters,
+      sorts: filters.sorts,
     });
     const res = await requestRaw<Ticket[]>(`/tickets${params}`);
     return { rows: res.data, total: res.meta?.total ?? res.data.length };
@@ -130,6 +137,23 @@ export const apiClient = {
 
   async firstReplyTrend(days = 14): Promise<TrendPoint[]> {
     return request<TrendPoint[]>(`/kpi/first-reply?days=${days}`);
+  },
+
+  async getOverview(
+    _scope: Scope,
+    params: { period: OverviewPeriod; year: number; month?: number; week?: string; day?: string; group_id?: string | "all"; owner_id?: string | "all"; page?: number; page_size?: number }
+  ): Promise<OverviewData> {
+    return request<OverviewData>(`/tickets/overview${qs({
+      period: params.period,
+      year: params.year,
+      month: params.month,
+      week: params.week,
+      day: params.day,
+      group_id: params.group_id,
+      owner_id: params.owner_id,
+      page: params.page,
+      per_page: params.page_size,
+    })}`);
   },
 
   // Agents
@@ -228,5 +252,28 @@ export const apiClient = {
 
   async triggerSync(): Promise<{ ok: true }> {
     return request("/system/sync/trigger", { method: "POST" });
+  },
+
+  // Settings / admin
+  async getSettings(): Promise<SettingsBundle> {
+    return request<SettingsBundle>("/settings");
+  },
+
+  async updateSchedules(patch: Partial<SyncSchedules>): Promise<{ schedules: SyncSchedules; applied_on_next_beat: boolean }> {
+    const current = await this.getSettings();
+    const next = { ...current.schedules, ...patch };
+    return request("/settings/schedules", { method: "PUT", body: JSON.stringify(next) });
+  },
+
+  async triggerSyncByKind(kind: "incremental" | "full"): Promise<{ triggered: boolean; kind: string }> {
+    return request("/settings/sync", { method: "POST", body: JSON.stringify({ kind }) });
+  },
+
+  async purgeCache(): Promise<{ purged: number }> {
+    return request("/settings/cache/purge", { method: "POST" });
+  },
+
+  async getSettingsStatus(): Promise<SettingsStatus> {
+    return request<SettingsStatus>("/settings/status");
   },
 };

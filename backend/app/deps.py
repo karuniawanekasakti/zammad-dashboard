@@ -7,6 +7,7 @@ from jose import JWTError, jwt
 from redis.asyncio import Redis
 
 from app.config import settings
+from app.db import get_db
 from app.models import Role
 
 security = HTTPBearer()

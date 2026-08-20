@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.deps import get_current_user, get_db, get_redis, require_roles
 from app.models import ApiResponse, Role
 from app.repositories import get_setting
@@ -32,6 +33,11 @@ async def health(db: Annotated[AsyncSession, Depends(get_db)]):
         "database": "ok" if db_ok else "down",
         "zammad": "ok" if zammad_ok else "down",
     }
+
+
+@router.get("/config", response_model=ApiResponse)
+async def public_config(current: Annotated[dict, Depends(get_current_user)]):
+    return ApiResponse(data={"zammad_base_url": settings.zammad_base_url})
 
 
 @router.get("/sync-status", response_model=ApiResponse)

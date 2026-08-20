@@ -17,12 +17,7 @@ const schema = z.object({
 });
 type FormValues = z.infer<typeof schema>;
 
-const PRESETS: { label: string; login: string }[] = [
-  { label: "Admin", login: "admin" },
-  { label: "Team Lead", login: "alice.smith" },
-  { label: "Project Manager", login: "grace.evans" },
-  { label: "Agent", login: "iris.taylor0" },
-];
+const ALLOWED_LOGIN = "helpdeskadmin@mti-tech.co.id";
 
 export default function LoginPage() {
   const user = useAuth((s) => s.user);
@@ -32,7 +27,7 @@ export default function LoginPage() {
 
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
-    defaultValues: { login: "admin", password: "password" },
+    defaultValues: { login: ALLOWED_LOGIN, password: "" },
   });
 
   if (user) return <Navigate to="/dashboard" replace />;
@@ -89,8 +84,8 @@ export default function LoginPage() {
           <CardContent>
             <form className="space-y-4" onSubmit={form.handleSubmit(onSubmit)}>
               <div className="space-y-2">
-                <Label htmlFor="login">Username or Email</Label>
-                <Input id="login" autoComplete="username" {...form.register("login")} />
+                <Label htmlFor="login">Email</Label>
+                <Input id="login" autoComplete="username" readOnly {...form.register("login")} />
                 {form.formState.errors.login && (
                   <p className="text-xs text-destructive">{form.formState.errors.login.message}</p>
                 )}
@@ -107,26 +102,6 @@ export default function LoginPage() {
                 Sign in
               </Button>
             </form>
-
-            <div className="mt-6 pt-4 border-t">
-              <p className="text-xs text-muted-foreground mb-2">Demo: click a role to prefill</p>
-              <div className="grid grid-cols-2 gap-2">
-                {PRESETS.map((p) => (
-                  <Button
-                    key={p.login}
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      form.setValue("login", p.login);
-                      form.setValue("password", "password");
-                    }}
-                  >
-                    {p.label}
-                  </Button>
-                ))}
-              </div>
-            </div>
           </CardContent>
         </Card>
       </div>

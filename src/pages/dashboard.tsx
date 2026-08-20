@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import {
@@ -62,6 +62,13 @@ const CHART_COLORS = [
   "hsl(200 80% 55%)",
 ];
 
+const TICKET_COUNT_COLORS = {
+  created: "hsl(var(--primary))",
+  closed: "hsl(142 76% 45%)",
+  backlog: "hsl(200 80% 55%)",
+  reopened: "hsl(32 95% 50%)",
+};
+
 export default function DashboardPage() {
   const user = useAuth((s) => s.user)!;
   const scope = useScope();
@@ -72,7 +79,6 @@ export default function DashboardPage() {
 
   const [groupFilter, setGroupFilter] = useState("all");
   const [agentFilter, setAgentFilter] = useState("all");
-
   // Build a filtered scope for queries
   const filteredScope = useMemo(() => {
     const base = { ...scope };
@@ -86,7 +92,6 @@ export default function DashboardPage() {
     if (groupFilter === "all") return list;
     return list.filter((a) => a.group_ids.includes(groupFilter));
   }, [allAgents.data, groupFilter]);
-
   return (
     <div className="space-y-6">
       <PageHeader
@@ -122,16 +127,16 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {user.role === "admin" && <AdminDashboard scope={filteredScope} agentFilter={agentFilter} />}
-      {user.role === "team_lead" && <TeamLeadDashboard scope={filteredScope} agentFilter={agentFilter} />}
-      {user.role === "project_manager" && <ProjectManagerDashboard scope={filteredScope} agentFilter={agentFilter} />}
-      {user.role === "agent" && <AgentDashboard scope={scope} userId={user.id} />}
+      {user.role === "admin" && <AdminDashboard scope={filteredScope} agentFilter={agentFilter} chart={<TicketCountChart scope={filteredScope} groupFilter={groupFilter} agentFilter={agentFilter} />} />}
+      {user.role === "team_lead" && <TeamLeadDashboard scope={filteredScope} agentFilter={agentFilter} chart={<TicketCountChart scope={filteredScope} groupFilter={groupFilter} agentFilter={agentFilter} />} />}
+      {user.role === "project_manager" && <ProjectManagerDashboard scope={filteredScope} agentFilter={agentFilter} chart={<TicketCountChart scope={filteredScope} groupFilter={groupFilter} agentFilter={agentFilter} />} />}
+      {user.role === "agent" && <AgentDashboard scope={scope} userId={user.id} chart={<TicketCountChart scope={scope} groupFilter="all" agentFilter="all" />} />}
     </div>
   );
 }
 
 // ---------- Admin Dashboard -------------------------------------------------
-function AdminDashboard({ scope, agentFilter }: { scope: ReturnType<typeof useScope>; agentFilter: string }) {
+function AdminDashboard({ scope, agentFilter, chart }: { scope: ReturnType<typeof useScope>; agentFilter: string; chart: ReactNode }) {
   const kpi = useQuery({ queryKey: ["kpi", "admin", scope, agentFilter], queryFn: () => api.kpiSummary(scope) });
   const volume = useQuery({ queryKey: ["trend", "volume", 30], queryFn: () => api.ticketVolumeTrend(30) });
   const breach = useQuery({ queryKey: ["trend", "breach", 30], queryFn: () => api.slaBreachTrend(30) });
@@ -178,6 +183,8 @@ function AdminDashboard({ scope, agentFilter }: { scope: ReturnType<typeof useSc
           trend={{ value: 4.8, direction: "up", goodIs: "down" }}
         />
       </div>
+
+      {chart}
 
       <div className="grid gap-4 lg:grid-cols-2">
         <ChartCard title="Ticket volume" description="New tickets per day (last 30d)">
@@ -294,7 +301,7 @@ function AdminDashboard({ scope, agentFilter }: { scope: ReturnType<typeof useSc
 }
 
 // ---------- Team Lead Dashboard --------------------------------------------
-function TeamLeadDashboard({ scope, agentFilter }: { scope: ReturnType<typeof useScope>; agentFilter: string }) {
+function TeamLeadDashboard({ scope, agentFilter, chart }: { scope: ReturnType<typeof useScope>; agentFilter: string; chart: ReactNode }) {
   const kpi = useQuery({ queryKey: ["kpi", "tl", scope, agentFilter], queryFn: () => api.kpiSummary(scope) });
   const agents = useQuery({ queryKey: ["agents", scope], queryFn: () => api.listAgents(scope) });
   const atRisk = useQuery({ queryKey: ["at_risk", scope], queryFn: () => api.listAtRisk(scope) });
@@ -317,6 +324,8 @@ function TeamLeadDashboard({ scope, agentFilter }: { scope: ReturnType<typeof us
         <KpiCard title="Group SLA breach" value={formatPercent(kpi.data?.sla_breach_rate ?? 0)} icon={AlertTriangle} iconClassName="bg-destructive/15 text-destructive" />
         <KpiCard title="Avg first reply" value={formatSeconds(kpi.data?.avg_first_reply_secs ?? 0)} icon={Clock} />
       </div>
+
+      {chart}
 
       <div className="grid gap-4 lg:grid-cols-2">
         <ChartCard title="Agent workload" description="Open / at-risk / breached per agent">
@@ -389,7 +398,7 @@ function TeamLeadDashboard({ scope, agentFilter }: { scope: ReturnType<typeof us
 }
 
 // ---------- Project Manager Dashboard --------------------------------------
-function ProjectManagerDashboard({ scope, agentFilter }: { scope: ReturnType<typeof useScope>; agentFilter: string }) {
+function ProjectManagerDashboard({ scope, agentFilter, chart }: { scope: ReturnType<typeof useScope>; agentFilter: string; chart: ReactNode }) {
   const kpi = useQuery({ queryKey: ["kpi", "pm", scope, agentFilter], queryFn: () => api.kpiSummary(scope) });
   const resTrend = useQuery({ queryKey: ["trend", "res", 14], queryFn: () => api.resolutionTimeTrend(14) });
   const tickets = useQuery({
@@ -424,6 +433,8 @@ function ProjectManagerDashboard({ scope, agentFilter }: { scope: ReturnType<typ
         <KpiCard title="SLA breach rate" value={formatPercent(kpi.data?.sla_breach_rate ?? 0)} icon={Gauge} />
         <KpiCard title="Reopen rate" value={formatPercent(kpi.data?.reopen_rate ?? 0)} icon={RotateCcw} />
       </div>
+
+      {chart}
 
       <div className="grid gap-4 lg:grid-cols-2">
         <ChartCard title="Tickets by tag" description="Top project/category tags">
@@ -500,8 +511,81 @@ function SummaryStat({ label, value }: { label: string; value: number }) {
   );
 }
 
+function TicketCountChart({ scope, groupFilter, agentFilter }: { scope: ReturnType<typeof useScope>; groupFilter: string; agentFilter: string }) {
+  const nav = useNavigate();
+  const year = new Date().getFullYear();
+  const overview = useQuery({
+    queryKey: ["overview", scope, "year", year, groupFilter, agentFilter, "dashboard-mini-chart"],
+    queryFn: () => api.getOverview(scope, { period: "year", year, group_id: groupFilter, owner_id: agentFilter, page: 1, page_size: 1 }),
+  });
+  const latest = useQuery({
+    queryKey: ["tickets", "latest-updated", scope, groupFilter, agentFilter],
+    queryFn: () => api.listTickets(scope, { group_id: groupFilter, owner_id: agentFilter, sort_by: "updated", sort_dir: "desc", page: 1, page_size: 5 }),
+  });
+
+  return (
+    <div className="grid gap-4 lg:grid-cols-3">
+      <Card
+        role="button"
+        tabIndex={0}
+        onClick={() => nav("/overview")}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") nav("/overview"); }}
+        className="flex h-full cursor-pointer flex-col transition-colors hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base">Ticket count</CardTitle>
+          <CardDescription>Click to open overview</CardDescription>
+        </CardHeader>
+        <CardContent className="min-h-[240px] flex-1 pb-4">
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={overview.data?.chart ?? []} margin={{ left: -18, right: 8, top: 8, bottom: 0 }}>
+              <XAxis dataKey="label" tick={{ fontSize: 10 }} tickLine={false} axisLine={false} />
+              <YAxis tick={{ fontSize: 10 }} tickLine={false} axisLine={false} allowDecimals={false} />
+              <Tooltip contentStyle={{ background: "hsl(var(--popover))", border: "1px solid hsl(var(--border))", borderRadius: 8 }} />
+              <Line type="monotone" dataKey="created" name="Created" stroke={TICKET_COUNT_COLORS.created} strokeWidth={2} dot={false} />
+              <Line type="monotone" dataKey="closed" name="Closed" stroke={TICKET_COUNT_COLORS.closed} strokeWidth={2} dot={false} />
+            </LineChart>
+          </ResponsiveContainer>
+        </CardContent>
+      </Card>
+
+      <Card className="lg:col-span-2">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Latest updated tickets</CardTitle>
+          <CardDescription>Most recently updated in this scope</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          {(latest.data?.rows ?? []).map((ticket) => (
+            <button
+              key={ticket.id}
+              type="button"
+              onClick={() => nav(`/tickets/${ticket.id}`)}
+              className="flex w-full items-center gap-3 rounded-md border p-2 text-left text-sm transition-colors hover:bg-muted/50"
+            >
+              <span className="min-w-0 flex-1">
+                <span className="block font-mono text-xs text-muted-foreground">#{ticket.number}</span>
+                <span className="block truncate font-medium">{ticket.title}</span>
+              </span>
+              <span className="hidden shrink-0 items-center gap-2 md:flex">
+                <PriorityBadge priority={ticket.priority} />
+                <StateBadge state={ticket.state} />
+                <span className="text-xs text-muted-foreground">
+                  {formatDistanceToNow(new Date(ticket.zammad_updated_at), { addSuffix: true })}
+                </span>
+              </span>
+            </button>
+          ))}
+          {!latest.isLoading && (latest.data?.rows ?? []).length === 0 && (
+            <div className="py-6 text-center text-sm text-muted-foreground">No tickets found.</div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 // ---------- Agent Dashboard -------------------------------------------------
-function AgentDashboard({ scope, userId }: { scope: ReturnType<typeof useScope>; userId: string }) {
+function AgentDashboard({ scope, userId, chart }: { scope: ReturnType<typeof useScope>; userId: string; chart: ReactNode }) {
   const nav = useNavigate();
   const kpi = useQuery({ queryKey: ["kpi", "agent", userId], queryFn: () => api.kpiSummary(scope) });
   const mine = useQuery({
@@ -519,6 +603,8 @@ function AgentDashboard({ scope, userId }: { scope: ReturnType<typeof useScope>;
         <KpiCard title="Avg 1st reply" value={formatSeconds(kpi.data?.avg_first_reply_secs ?? 0)} icon={Clock} />
         <KpiCard title="Reopen rate" value={formatPercent(kpi.data?.reopen_rate ?? 0)} icon={RotateCcw} />
       </div>
+
+      {chart}
 
       <Card>
         <CardHeader className="pb-3">

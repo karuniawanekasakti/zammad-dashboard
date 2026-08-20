@@ -11,6 +11,7 @@ import {
   type PaginationState,
   type SortingState,
 } from "@tanstack/react-table";
+import { Spinner } from "@/components/spinner";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
@@ -36,6 +37,7 @@ interface DataTableProps<TData, TValue> {
   onColumnVisibilityChange: OnChangeFn<VisibilityState>;
   toolbar?: (table: TanstackTable<TData>) => React.ReactNode;
   emptyMessage?: string;
+  isLoading?: boolean;
   onRowClick?: (row: TData) => void;
   meta?: Record<string, unknown>;
 }
@@ -54,6 +56,7 @@ export function DataTable<TData, TValue>({
   onColumnVisibilityChange,
   toolbar,
   emptyMessage = "No results.",
+  isLoading = false,
   onRowClick,
   meta,
 }: DataTableProps<TData, TValue>) {
@@ -97,7 +100,16 @@ export function DataTable<TData, TValue>({
             ))}
           </TableHeader>
           <TableBody>
-            {table.getRowModel().rows.length === 0 ? (
+            {isLoading ? (
+              <TableRow>
+                <TableCell colSpan={table.getAllLeafColumns().length} className="h-24 text-muted-foreground">
+                  <div className="flex items-center justify-center gap-2">
+                    <Spinner />
+                    Loading…
+                  </div>
+                </TableCell>
+              </TableRow>
+            ) : table.getRowModel().rows.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={table.getAllLeafColumns().length} className="h-24 text-center text-muted-foreground">
                   {emptyMessage}

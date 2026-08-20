@@ -3,6 +3,7 @@ import {
   alertRules,
   articlesForTicket,
   channels,
+  historyForTicket,
   deleteAlertRule,
   fullName,
   groupStats,
@@ -12,6 +13,7 @@ import {
   notifications,
   reportExports,
   addReportExport,
+  slaPolicies,
   systemSettings,
   tickets,
   trendFor,
@@ -33,10 +35,13 @@ import type {
   Role,
   SettingsBundle,
   SettingsStatus,
+  SlaMonitorData,
+  SlaPolicy,
   SyncSchedules,
   SystemSettings,
   Ticket,
   TicketArticle,
+  TicketHistory,
   TicketPriority,
   TicketState,
   TrendPoint,
@@ -83,6 +88,10 @@ const TICKET_FILTER_FIELDS = new Set<keyof Ticket>([
   "title",
   "state",
   "priority",
+  "severity",
+  "severity_label",
+  "ticket_category",
+  "ticket_category_label",
   "group_id",
   "owner_id",
   "customer_name",
@@ -137,6 +146,116 @@ function applyTicketSorts(rows: Ticket[], sorts?: string, sortBy?: string, sortD
   });
 }
 
+type LiveSlaStatus = SlaMonitorData["tickets"][number]["live_sla_status"];
+
+function slaDeadline(ticket: Ticket): Date | null {
+  const values = [ticket.escalation_at, ticket.first_response_escalation_at, ticket.update_escalation_at, ticket.close_escalation_at].filter(Boolean) as string[];
+  return values.length ? new Date(Math.min(...values.map((v) => new Date(v).getTime()))) : null;
+}
+
+function slaStatus(ticket: Ticket, now: Date): LiveSlaStatus {
+  const deadline = slaDeadline(ticket);
+  if (!deadline) return "no_sla";
+  if (ticket.state === "closed" || ticket.state === "merged") {
+    const closedAt = ticket.close_at ?? ticket.closed_at;
+    return closedAt && new Date(closedAt) <= deadline ? "closed_on_time" : "breached";
+  }
+  if (ticket.first_response_breached || ticket.close_breached || ticket.sla_status === "breached" || now > deadline) return "breached";
+  const remaining = (deadline.getTime() - now.getTime()) / 1000;
+  if (remaining <= 30 * 60) return "critical";
+  if (remaining <= 2 * 60 * 60) return "warning";
+  return "on_track";
+}
+
+function slaRemainingMs(ticket: Ticket, now: Date): number | null {
+  const deadline = slaDeadline(ticket);
+  return deadline ? deadline.getTime() - now.getTime() : null;
+}
+
+function slaProgress(ticket: Ticket, now: Date): number {
+  const deadline = slaDeadline(ticket);
+  if (!deadline) return 0;
+  const start = new Date(ticket.zammad_created_at).getTime();
+  const end = deadline.getTime();
+  return end <= start ? 0 : Math.max(0, Math.min(100, Math.round(((now.getTime() - start) / (end - start)) * 100)));
+}
+
+function slaCounts(rows: SlaMonitorData["tickets"]): Omit<SlaMonitorData["priority_rows"][number], "name"> {
+  const withSla = rows.filter((t) => t.live_sla_status !== "no_sla");
+  const ok = withSla.filter((t) => t.live_sla_status === "on_track" || t.live_sla_status === "closed_on_time").length;
+  return {
+    total: rows.length,
+    total_with_sla: withSla.length,
+    on_track: rows.filter((t) => t.live_sla_status === "on_track").length,
+    warning: rows.filter((t) => t.live_sla_status === "warning").length,
+    critical: rows.filter((t) => t.live_sla_status === "critical").length,
+    at_risk: rows.filter((t) => t.live_sla_status === "warning" || t.live_sla_status === "critical").length,
+    breached: rows.filter((t) => t.live_sla_status === "breached").length,
+    no_sla: rows.filter((t) => t.live_sla_status === "no_sla").length,
+    compliance_rate: withSla.length ? (ok / withSla.length) * 100 : null,
+  };
+}
+
+function slaMonitorRow(name: string, rows: SlaMonitorData["tickets"]): SlaMonitorData["priority_rows"][number] {
+  return { name, ...slaCounts(rows) };
+}
+
+function buildMockSlaMonitor(rows: Ticket[]): SlaMonitorData {
+  const now = new Date();
+  const active = rows.filter((t) => t.state === "new" || t.state === "open" || t.state === "pending");
+  const closed = rows.filter((t) => t.state === "closed");
+  const enriched = active.map((t) => ({ ...t, live_sla_status: slaStatus(t, now), sla_remaining_ms: slaRemainingMs(t, now), sla_progress: slaProgress(t, now) }));
+  const closedEnriched = closed.map((t) => ({ ...t, live_sla_status: slaStatus(t, now), sla_remaining_ms: slaRemainingMs(t, now), sla_progress: slaProgress(t, now) }));
+  const grid = Array.from({ length: 7 }, () => Array(24).fill(0));
+  enriched.filter((t) => t.live_sla_status === "breached").forEach((t) => {
+    const d = slaDeadline(t) ?? new Date(t.zammad_updated_at);
+    grid[(d.getDay() + 6) % 7][d.getHours()] += 1;
+  });
+  const dayLabels = ["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"];
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const trend = Array.from({ length: 7 }, (_, i) => {
+    const day = new Date(today);
+    day.setDate(today.getDate() - (6 - i));
+    const next = new Date(day);
+    next.setDate(day.getDate() + 1);
+    const dayRows = closed.filter((t) => {
+      const close = new Date(t.close_at ?? t.closed_at ?? 0).getTime();
+      return day.getTime() <= close && close < next.getTime();
+    });
+    const breach = dayRows.filter((t) => slaStatus(t, now) === "breached").length;
+    return { date: day.toISOString().slice(0, 10), day: dayLabels[day.getDay()], rate: dayRows.length ? ((dayRows.length - breach) / dayRows.length) * 100 : 0, total: dayRows.length, breach };
+  });
+  const rank: Record<LiveSlaStatus, number> = { breached: 0, critical: 1, warning: 2, on_track: 3, safe: 3, no_sla: 4, closed_on_time: 5 };
+  enriched.sort((a, b) => rank[a.live_sla_status] - rank[b.live_sla_status] || (a.sla_remaining_ms ?? Infinity) - (b.sla_remaining_ms ?? Infinity));
+  const breachLog = closed.filter((t) => slaStatus(t, now) === "breached").sort((a, b) => new Date(b.close_at ?? b.closed_at ?? 0).getTime() - new Date(a.close_at ?? a.closed_at ?? 0).getTime());
+  const avgCloseRows = closed.filter((t) => t.close_at || t.closed_at).map((t) => t.close_in_min).filter((n): n is number => n != null);
+  const summary = {
+    ...slaCounts(enriched),
+    compliance_rate: slaCounts(enriched).compliance_rate ?? 0,
+    total_active: active.length,
+    sla_total: slaCounts(enriched).total_with_sla,
+    total_closed_on_time: closedEnriched.filter((t) => t.live_sla_status === "closed_on_time").length,
+    avg_resolution_minutes: avgCloseRows.length ? Math.round(avgCloseRows.reduce((sum, n) => sum + n, 0) / avgCloseRows.length) : null,
+    avg_resolution_mins: avgCloseRows.length ? Math.round(avgCloseRows.reduce((sum, n) => sum + n, 0) / avgCloseRows.length) : null,
+  };
+  const priority_rows = (["very high", "high", "normal", "low"] as TicketPriority[]).map((p) => slaMonitorRow(p === "very high" ? "Urgent" : p === "normal" ? "Medium" : p, enriched.filter((t) => t.priority === p)));
+  const sla_rows = [...new Set(enriched.map((t) => t.group_name).filter(Boolean))].sort().map((name) => slaMonitorRow(name, enriched.filter((t) => t.group_name === name)));
+  return {
+    ...summary,
+    summary,
+    by_priority: Object.fromEntries(priority_rows.map((row) => [row.name, row])),
+    by_group: Object.fromEntries(sla_rows.map((row) => [row.name, row])),
+    priority_rows,
+    sla_rows,
+    trend,
+    heatmap: { grid, max: Math.max(1, ...grid.flat()) },
+    tickets: enriched,
+    risk_rows: enriched.filter((t) => t.live_sla_status === "breached" || t.live_sla_status === "critical" || t.live_sla_status === "warning"),
+    breach_log: breachLog,
+  };
+}
+
 function overviewBuckets(period: OverviewPeriod, year: number, month?: number, week?: string, day?: string) {
   const now = new Date();
   if (period === "year") {
@@ -181,12 +300,24 @@ function bucketIndex(buckets: ReturnType<typeof overviewBuckets>, value: string 
   return buckets.findIndex((b) => b.start.getTime() <= time && time < b.end.getTime());
 }
 
+function mockSearchTickets(rows: Ticket[], query: string): Ticket[] {
+  const stateMatch = query.match(/state_id:\(([^)]+)\)/);
+  if (stateMatch) {
+    const ids = stateMatch[1].split(",").map((v) => v.trim());
+    rows = rows.filter((t) => ids.includes(t.state_id));
+  }
+  if (query.includes("close_at:[now-7d TO now]")) {
+    const cutoff = Date.now() - 7 * 24 * 3600 * 1000;
+    rows = rows.filter((t) => t.close_at && new Date(t.close_at).getTime() >= cutoff);
+  }
+  return rows;
+}
+
 const mockApi = {
   // Auth --------------------------------------------------------------------
   async login(login: string, _password: string): Promise<User> {
-    const u = users.find(
-      (x) => x.login.toLowerCase() === login.toLowerCase() || x.email.toLowerCase() === login.toLowerCase()
-    );
+    if (login.toLowerCase() !== "helpdeskadmin@mti-tech.co.id") throw new Error("Invalid credentials");
+    const u = users.find((x) => x.email.toLowerCase() === login.toLowerCase());
     if (!u) throw new Error("Invalid credentials");
     return delay(u, 400);
   },
@@ -229,6 +360,10 @@ const mockApi = {
     return delay({ ticket: t, articles: articlesForTicket(id) });
   },
 
+  async getTicketHistory(id: string): Promise<TicketHistory[]> {
+    return delay(historyForTicket(id));
+  },
+
   async listAtRisk(scope: Scope): Promise<Ticket[]> {
     const rows = applyScope(tickets, scope).filter(
       (t) => t.sla_status === "warning" || t.sla_status === "critical" || t.sla_status === "breached"
@@ -239,6 +374,20 @@ const mockApi = {
           (a.first_response_remaining_secs ?? Infinity) - (b.first_response_remaining_secs ?? Infinity)
       )
     );
+  },
+
+  async listSlaMonitor(scope: Scope, groupId?: string): Promise<SlaMonitorData> {
+    let rows = applyScope(tickets, scope);
+    if (groupId && groupId !== "all") rows = rows.filter((t) => t.group_id === groupId);
+    return delay(buildMockSlaMonitor(rows));
+  },
+
+  async searchTickets(query: string, perPage = 100): Promise<Ticket[]> {
+    return delay(mockSearchTickets([...tickets], query).slice(0, perPage));
+  },
+
+  async listSlaPolicies(): Promise<SlaPolicy[]> {
+    return delay(slaPolicies);
   },
 
   // KPI / Trends ------------------------------------------------------------
@@ -437,6 +586,10 @@ const mockApi = {
   },
 
   // System ------------------------------------------------------------------
+  async getPublicConfig(): Promise<{ zammad_base_url: string }> {
+    return delay({ zammad_base_url: systemSettings.zammad_base_url });
+  },
+
   async getSystemSettings(): Promise<SystemSettings> {
     return delay({ ...systemSettings });
   },

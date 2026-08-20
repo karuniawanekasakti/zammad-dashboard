@@ -27,12 +27,13 @@ function csvCell(value: unknown): string {
 }
 
 function downloadTicketsCsv(rows: Ticket[]) {
-  const headers = ["Number", "Title", "State", "Priority", "Group", "Agent", "Customer", "SLA", "Updated"];
+  const headers = ["Number", "Title", "State", "Severity", "Ticket Category", "Group", "Agent", "Customer", "SLA", "Updated"];
   const body = rows.map((ticket) => [
     ticket.number,
     ticket.title,
     ticket.state,
-    ticket.priority,
+    ticket.severity_label ?? ticket.severity,
+    ticket.ticket_category_label ?? ticket.ticket_category,
     ticket.group_name,
     ticket.owner_name ?? "Unassigned",
     ticket.customer_name,
@@ -137,6 +138,7 @@ export default function TicketsPage() {
             onColumnVisibilityChange={setColumnVisibility}
             groups={groups.data ?? []}
             agents={agents.data ?? []}
+            isLoading={tickets.isLoading}
             onView={(ticket) => nav(`/tickets/${ticket.id}`)}
             onExport={() => downloadTicketsCsv(tickets.data?.rows ?? EMPTY_TICKETS)}
           />

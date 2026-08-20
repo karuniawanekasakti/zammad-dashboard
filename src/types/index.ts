@@ -23,7 +23,17 @@ export interface Group {
 
 export type TicketState = "new" | "open" | "pending" | "closed" | "merged";
 export type TicketPriority = "low" | "normal" | "high" | "very high";
-export type SlaStatus = "safe" | "warning" | "critical" | "breached";
+export type SlaStatus = "safe" | "on_track" | "warning" | "critical" | "breached" | "no_sla" | "closed_on_time";
+
+export interface SlaPolicy {
+  id: number;
+  name: string;
+  calendar_id: number | null;
+  first_response_time: number | null;
+  update_time: number | null;
+  solution_time: number | null;
+  condition: Record<string, { operator?: string; value?: string | number | Array<string | number> }>;
+}
 
 export interface Ticket {
   id: string;
@@ -32,6 +42,12 @@ export interface Ticket {
   title: string;
   state: TicketState;
   priority: TicketPriority;
+  priority_id: string;
+  state_id: string;
+  severity: string | null;
+  severity_label: string | null;
+  ticket_category: string | null;
+  ticket_category_label: string | null;
   group_id: string;
   group_name: string;
   owner_id: string | null;
@@ -39,6 +55,17 @@ export interface Ticket {
   customer_name: string;
   tags: string[];
   sla_status: SlaStatus;
+  escalation_at: string | null;
+  first_response_at: string | null;
+  first_response_escalation_at: string | null;
+  first_response_in_min: number | null;
+  first_response_diff_in_min: number | null;
+  close_at: string | null;
+  close_escalation_at: string | null;
+  close_in_min: number | null;
+  close_diff_in_min: number | null;
+  update_escalation_at: string | null;
+  update_diff_in_min: number | null;
   first_response_remaining_secs: number | null;
   first_response_breached: boolean;
   close_breached: boolean;
@@ -50,6 +77,71 @@ export interface Ticket {
   closed_at: string | null;
 }
 
+export interface SlaMonitorTicket extends Ticket {
+  live_sla_status: SlaStatus;
+  sla_remaining_ms: number | null;
+  sla_progress: number;
+}
+
+export interface SlaMonitorRow {
+  name: string;
+  total: number;
+  total_with_sla: number;
+  on_track: number;
+  warning: number;
+  critical: number;
+  at_risk: number;
+  breached: number;
+  no_sla: number;
+  compliance_rate: number | null;
+}
+
+export interface SlaMonitorTrendPoint {
+  date: string;
+  day: string;
+  rate: number;
+  total: number;
+  breach: number;
+}
+
+export interface SlaMonitorData {
+  compliance_rate: number;
+  total_with_sla: number;
+  total_closed_on_time: number;
+  on_track: number;
+  warning: number;
+  critical: number;
+  at_risk: number;
+  breached: number;
+  no_sla: number;
+  avg_resolution_minutes: number | null;
+  summary: {
+    total: number;
+    total_active: number;
+    total_with_sla: number;
+    sla_total: number;
+    compliance_rate: number;
+    total_closed_on_time: number;
+    on_track: number;
+    warning: number;
+    critical: number;
+    at_risk: number;
+    breached: number;
+    no_sla: number;
+    avg_resolution_minutes: number | null;
+    avg_resolution_mins: number | null;
+  };
+  by_priority: Record<string, SlaMonitorRow>;
+  by_group: Record<string, SlaMonitorRow>;
+  priority_rows: SlaMonitorRow[];
+  sla_rows: SlaMonitorRow[];
+  trend: SlaMonitorTrendPoint[];
+  heatmap: { grid: number[][]; max: number };
+  tickets: SlaMonitorTicket[];
+  risk_rows: SlaMonitorTicket[];
+  breach_log: Ticket[];
+}
+
 export interface TicketArticle {
   id: string;
   ticket_id: string;
@@ -59,6 +151,29 @@ export interface TicketArticle {
   internal: boolean;
   body: string;
   created_at: string;
+}
+
+export interface TicketHistory {
+  id?: string | number;
+  type?: string;
+  action?: string;
+  object?: string;
+  attribute?: string;
+  title?: string;
+  body?: string;
+  created_at?: string;
+  updated_at?: string;
+  created_by?: string | { firstname?: string; lastname?: string; login?: string; name?: string };
+  from?: unknown;
+  to?: unknown;
+  old?: unknown;
+  new?: unknown;
+  value_from?: unknown;
+  value_to?: unknown;
+  related_o_id?: string | number;
+  related_object?: string;
+  changes?: Record<string, unknown> | unknown[];
+  [key: string]: unknown;
 }
 
 export interface KpiSummary {

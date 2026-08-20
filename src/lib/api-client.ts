@@ -15,10 +15,13 @@ import type {
   ReportExport,
   SettingsBundle,
   SettingsStatus,
+  SlaMonitorData,
+  SlaPolicy,
   SyncSchedules,
   SystemSettings,
   Ticket,
   TicketArticle,
+  TicketHistory,
   TrendPoint,
   User,
 } from "@/types";
@@ -114,8 +117,25 @@ export const apiClient = {
     return request(`/tickets/${id}`);
   },
 
+  async getTicketHistory(id: string): Promise<TicketHistory[]> {
+    const data = await request<TicketHistory[] | { history?: TicketHistory[] }>(`/ticket_history/${id}`);
+    return Array.isArray(data) ? data : data.history ?? [];
+  },
+
   async listAtRisk(_scope: Scope): Promise<Ticket[]> {
     return request<Ticket[]>("/tickets/sla-at-risk");
+  },
+
+  async listSlaMonitor(_scope: Scope, groupId?: string): Promise<SlaMonitorData> {
+    return request<SlaMonitorData>(`/tickets/sla-monitor${qs({ group_id: groupId })}`);
+  },
+
+  async searchTickets(query: string, perPage = 100): Promise<Ticket[]> {
+    return request<Ticket[]>(`/tickets/search${qs({ query, expand: true, per_page: perPage })}`);
+  },
+
+  async listSlaPolicies(): Promise<SlaPolicy[]> {
+    return request<SlaPolicy[]>("/slas");
   },
 
   // KPI
@@ -230,6 +250,10 @@ export const apiClient = {
   },
 
   // System
+  async getPublicConfig(): Promise<{ zammad_base_url: string }> {
+    return request<{ zammad_base_url: string }>("/system/config");
+  },
+
   async getSystemSettings(): Promise<SystemSettings> {
     const health = await request<any>("/system/health");
     return {

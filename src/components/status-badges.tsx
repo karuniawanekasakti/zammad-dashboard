@@ -38,6 +38,26 @@ export function PriorityBadge({ priority, className }: { priority: TicketPriorit
   );
 }
 
+const SEVERITY_CLASS: Record<string, string> = {
+  p01: "bg-red-500/15 text-red-700 dark:text-red-400 border-red-500/30",
+  p02: "bg-orange-500/15 text-orange-700 dark:text-orange-400 border-orange-500/30",
+  p03: "bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/30",
+  p04: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-emerald-500/30",
+  BRI01: "bg-red-500/15 text-red-700 dark:text-red-400 border-red-500/30",
+  BRI02: "bg-orange-500/15 text-orange-700 dark:text-orange-400 border-orange-500/30",
+  BRI03: "bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/30",
+  BRI04: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-emerald-500/30",
+};
+
+export function SeverityBadge({ severity, label, className }: { severity: string | null; label: string | null; className?: string }) {
+  if (!severity && !label) return <span className="text-muted-foreground">—</span>;
+  return (
+    <Badge variant="outline" className={cn("font-medium", severity ? SEVERITY_CLASS[severity] : undefined, className)}>
+      {label ?? severity}
+    </Badge>
+  );
+}
+
 const ROLE_MAP: Record<Role, { label: string; className: string }> = {
   admin: { label: "Admin", className: "bg-indigo-500/15 text-indigo-600 dark:text-indigo-300 border-indigo-500/30" },
   team_lead: { label: "Team Lead", className: "bg-violet-500/15 text-violet-600 dark:text-violet-300 border-violet-500/30" },

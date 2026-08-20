@@ -72,6 +72,19 @@ class ZammadClient:
             r.raise_for_status()
             return r.json()
 
+    async def get_ticket_history(self, ticket_id: int) -> list[dict] | dict:
+        async with self._client() as c:
+            for path in (
+                f"/api/v1/ticket_history/{ticket_id}",
+                f"/api/v1/ticket_histories/by_ticket/{ticket_id}",
+                f"/api/v1/tickets/{ticket_id}/history",
+            ):
+                r = await c.get(path)
+                if r.status_code != 404:
+                    r.raise_for_status()
+                    return r.json()
+        return []
+
     async def get_users(self, page: int = 1, per_page: int = 200) -> list[dict]:
         async with self._client() as c:
             r = await c.get("/api/v1/users", params={"page": page, "per_page": per_page, "expand": "true"})

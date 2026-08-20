@@ -12,8 +12,10 @@ import type {
   SystemSettings,
   Ticket,
   TicketArticle,
+  TicketHistory,
   TicketPriority,
   TicketState,
+  SlaPolicy,
   TrendPoint,
   User,
 } from "@/types";
@@ -111,7 +113,7 @@ export const users: User[] = [];
 users.push({
   id: uuid("usr", 1),
   zammad_id: 1,
-  email: "admin@acme.com",
+  email: "helpdeskadmin@mti-tech.co.id",
   firstname: "System",
   lastname: "Administrator",
   login: "admin",
@@ -182,6 +184,24 @@ export function fullName(u: User): string {
 // -- Tickets -----------------------------------------------------------------
 const STATES: TicketState[] = ["new", "open", "pending", "closed"];
 const PRIORITIES: TicketPriority[] = ["low", "normal", "high", "very high"];
+const PRIORITY_IDS: Record<TicketPriority, string> = { low: "1", normal: "2", high: "3", "very high": "4" };
+const STATE_IDS: Record<TicketState, string> = { new: "1", open: "2", pending: "3", closed: "4", merged: "5" };
+const SEVERITIES = [
+  { value: "p01", label: "P1 - Critical" },
+  { value: "p02", label: "P2 - High" },
+  { value: "p03", label: "P3 - Medium" },
+  { value: "p04", label: "P4 - Low" },
+  { value: "BRI01", label: "BRI Critical 1 (0-30 KM)" },
+  { value: "BRI02", label: "BRI Critical 2 (30-60 KM)" },
+  { value: "BRI03", label: "BRI Critical 3 (60-120 KM)" },
+  { value: "BRI04", label: "BRI Critical 4 (120-200 KM)" },
+];
+const TICKET_CATEGORIES = [
+  { value: "HSU", label: "Hardware Software Update" },
+  { value: "SRSM", label: "Service Request Support and Management" },
+  { value: "SPMS", label: "SparePart Management System" },
+  { value: "Reporting", label: "Reporting" },
+];
 const TAG_POOL = [
   "bug",
   "feature-request",
@@ -224,6 +244,12 @@ const CUSTOMERS = [
 ];
 
 const agents = users.filter((u) => u.role === "agent");
+
+export const slaPolicies: SlaPolicy[] = [
+  { id: 1, name: "Urgent SLA", calendar_id: 1, first_response_time: 15, update_time: 60, solution_time: 240, condition: { "ticket.priority_id": { operator: "is", value: "4" } } },
+  { id: 2, name: "High SLA", calendar_id: 1, first_response_time: 30, update_time: 120, solution_time: 480, condition: { "ticket.priority_id": { operator: "is", value: "3" } } },
+  { id: 3, name: "Standard SLA", calendar_id: 1, first_response_time: 60, update_time: 240, solution_time: 1440, condition: {} },
+];
 
 function pickSla(state: TicketState, createdHoursAgo: number) {
   if (state === "closed") {
@@ -276,6 +302,9 @@ for (let i = 0; i < TICKET_COUNT; i++) {
   const zammad_created_at = new Date(Date.now() - createdHoursAgo * 3600 * 1000).toISOString();
   const closedHoursAgo = state === "closed" ? Math.max(1, createdHoursAgo - between(0, createdHoursAgo - 1)) : null;
   const sla = pickSla(state, createdHoursAgo);
+  const priority = pick(PRIORITIES);
+  const severity = pick(SEVERITIES);
+  const category = rand() > 0.2 ? pick(TICKET_CATEGORIES) : null;
   const resolution_time_secs =
     state === "closed" ? (createdHoursAgo - (closedHoursAgo ?? 0)) * 3600 : null;
   const first_reply_time_secs = rand() > 0.1 ? between(120, 4 * 3600) : null;
@@ -286,7 +315,13 @@ for (let i = 0; i < TICKET_COUNT; i++) {
     number: (10000 + i).toString(),
     title: pick(TITLE_TEMPLATES),
     state,
-    priority: pick(PRIORITIES),
+    priority,
+    priority_id: PRIORITY_IDS[priority],
+    state_id: STATE_IDS[state],
+    severity: severity.value,
+    severity_label: severity.label,
+    ticket_category: category?.value ?? null,
+    ticket_category_label: category?.label ?? null,
     group_id: group.id,
     group_name: group.name,
     owner_id: owner?.id ?? null,
@@ -294,6 +329,17 @@ for (let i = 0; i < TICKET_COUNT; i++) {
     customer_name: pick(CUSTOMERS),
     tags: Array.from(new Set([pick(TAG_POOL), pick(TAG_POOL)])).filter(Boolean),
     sla_status: sla.sla_status,
+    escalation_at: sla.first_response_remaining_secs == null ? null : new Date(Date.now() + sla.first_response_remaining_secs * 1000).toISOString(),
+    first_response_at: first_reply_time_secs == null ? null : new Date(new Date(zammad_created_at).getTime() + first_reply_time_secs * 1000).toISOString(),
+    first_response_escalation_at: sla.first_response_remaining_secs == null ? null : new Date(Date.now() + sla.first_response_remaining_secs * 1000).toISOString(),
+    first_response_in_min: first_reply_time_secs == null ? null : Math.floor(first_reply_time_secs / 60),
+    first_response_diff_in_min: sla.first_response_breached ? -between(5, 120) : between(5, 240),
+    close_at: closedHoursAgo ? new Date(Date.now() - closedHoursAgo * 3600 * 1000).toISOString() : null,
+    close_escalation_at: new Date(new Date(zammad_created_at).getTime() + 8 * 3600 * 1000).toISOString(),
+    close_in_min: resolution_time_secs == null ? null : Math.floor(resolution_time_secs / 60),
+    close_diff_in_min: state === "closed" ? (sla.close_breached ? -between(10, 240) : between(10, 480)) : null,
+    update_escalation_at: state === "closed" ? null : new Date(Date.now() + between(1, 6) * 3600 * 1000).toISOString(),
+    update_diff_in_min: state === "closed" ? null : between(-60, 240),
     first_response_remaining_secs: sla.first_response_remaining_secs,
     first_response_breached: sla.first_response_breached,
     close_breached: sla.close_breached,
@@ -339,6 +385,65 @@ export function articlesForTicket(ticketId: string): TicketArticle[] {
     });
   }
   return arts;
+}
+
+export function historyForTicket(ticketId: string): TicketHistory[] {
+  const ticket = tickets.find((t) => t.id === ticketId);
+  if (!ticket) return [];
+  const base = new Date(ticket.zammad_created_at).getTime();
+  const history: TicketHistory[] = [
+    {
+      id: `${ticket.id}-created`,
+      type: "created",
+      title: "Ticket created",
+      created_by: ticket.customer_name,
+      created_at: ticket.zammad_created_at,
+      to: ticket.state,
+    },
+    {
+      id: `${ticket.id}-priority`,
+      type: "priority",
+      attribute: "priority",
+      created_by: ticket.owner_name ?? "System",
+      created_at: new Date(base + 8 * 60 * 1000).toISOString(),
+      from: "normal",
+      to: ticket.priority,
+    },
+    ...articlesForTicket(ticketId).map((article) => ({
+      id: `${article.id}-history`,
+      type: article.type,
+      title: article.internal ? "Internal note added" : "Article added",
+      body: article.body,
+      created_by: article.author_name,
+      created_at: article.created_at,
+    })),
+  ];
+
+  if (ticket.owner_name) {
+    history.push({
+      id: `${ticket.id}-owner`,
+      type: "owner",
+      attribute: "owner",
+      created_by: "System",
+      created_at: new Date(base + 15 * 60 * 1000).toISOString(),
+      from: "Unassigned",
+      to: ticket.owner_name,
+    });
+  }
+
+  if (ticket.state !== "new") {
+    history.push({
+      id: `${ticket.id}-state`,
+      type: "state",
+      attribute: "state",
+      created_by: ticket.owner_name ?? "System",
+      created_at: ticket.zammad_updated_at,
+      from: "new",
+      to: ticket.state,
+    });
+  }
+
+  return history.sort((a, b) => new Date(String(b.created_at)).getTime() - new Date(String(a.created_at)).getTime());
 }
 
 // -- KPI summary -------------------------------------------------------------

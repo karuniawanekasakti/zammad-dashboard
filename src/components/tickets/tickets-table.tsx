@@ -7,7 +7,7 @@ import { DataTableAdvancedToolbar } from "@/components/data-table/data-table-adv
 import type { DataTableFilter, DataTableOption, DataTableSort } from "@/components/data-table/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { StateBadge, PriorityBadge } from "@/components/status-badges";
+import { SeverityBadge, StateBadge } from "@/components/status-badges";
 import { SlaBadge } from "@/components/sla-badge";
 import { buildTicketFilterFields, ticketSortFields } from "@/lib/ticket-fields";
 import type { Group, Ticket, User } from "@/types";
@@ -27,6 +27,7 @@ interface TicketsTableProps {
   onColumnVisibilityChange: OnChangeFn<VisibilityState>;
   groups: Group[];
   agents: User[];
+  isLoading?: boolean;
   onView: (ticket: Ticket) => void;
   onExport?: () => void;
 }
@@ -46,6 +47,7 @@ export function TicketsTable({
   onColumnVisibilityChange,
   groups,
   agents,
+  isLoading = false,
   onView,
   onExport,
 }: TicketsTableProps) {
@@ -74,6 +76,7 @@ export function TicketsTable({
       onColumnVisibilityChange={onColumnVisibilityChange}
       meta={{ sorts, onSortsChange }}
       emptyMessage="No tickets match the current filters."
+      isLoading={isLoading}
       onRowClick={onView}
       toolbar={(table) => (
         <DataTableAdvancedToolbar
@@ -140,10 +143,16 @@ function ticketColumns(onView: (ticket: Ticket) => void): ColumnDef<Ticket>[] {
       cell: ({ row }) => <StateBadge state={row.original.state} />,
     },
     {
-      accessorKey: "priority",
-      header: "Priority",
-      meta: { label: "Priority" },
-      cell: ({ row }) => <PriorityBadge priority={row.original.priority} />,
+      accessorKey: "severity",
+      header: "Severity",
+      meta: { label: "Severity" },
+      cell: ({ row }) => <SeverityBadge severity={row.original.severity} label={row.original.severity_label} />,
+    },
+    {
+      accessorKey: "ticket_category",
+      header: "Ticket Category",
+      meta: { label: "Ticket Category" },
+      cell: ({ row }) => row.original.ticket_category_label ?? row.original.ticket_category ?? <span className="text-muted-foreground">—</span>,
     },
     {
       accessorKey: "owner_name",

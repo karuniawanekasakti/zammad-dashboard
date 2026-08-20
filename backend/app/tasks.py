@@ -20,7 +20,7 @@ from app.config import settings
 from app.repositories import get_setting, set_setting
 from app.routers.agents import _group_ids, _map_agent
 from app.routers.groups import _map_group
-from app.routers.tickets import _map_article, _map_ticket
+from app.routers.tickets import OPEN_STATES, _map_article, _map_state, _map_ticket
 from app.zammad_client import zammad
 
 SYNC_WATERMARK_KEY = "sync:last_ticket_updated_at"
@@ -30,6 +30,24 @@ LAST_RUN_KEY = "sync:last_run"
 def _map_groups(raw_groups: list[dict], raw_users: list[dict]):
     agent_counts = Counter(g for user in raw_users for g in _group_ids(user))
     return [_map_group(g, agent_counts[str(g["id"])]) for g in raw_groups]
+
+
+def _missing_sla_fields(ticket: dict) -> bool:
+    return _map_state(ticket.get("state") or "open") in OPEN_STATES and not (ticket.get("first_response_escalation_at") or ticket.get("close_escalation_at"))
+
+
+async def _with_sla_details(raw_tickets: list[dict]) -> list[dict]:
+    rows = []
+    for ticket in raw_tickets:
+        if not _missing_sla_fields(ticket):
+            rows.append(ticket)
+            continue
+        try:
+            # ponytail: accurate SLA detail beats sync speed; batch/limit this if Zammad sync gets slow.
+            rows.append(await zammad.get_ticket(ticket["id"]))
+        except Exception:
+            rows.append(ticket)
+    return rows
 
 
 async def _with_engine(db_coro: Callable[[async_sessionmaker], Awaitable]):
@@ -93,7 +111,7 @@ async def run_incremental_sync() -> dict:
             setting = await get_setting(session, SYNC_WATERMARK_KEY)
             if setting:
                 updated_since = setting.get("value")
-            raw = await zammad.get_all_tickets(per_page=100, updated_since=updated_since)
+            raw = await _with_sla_details(await zammad.get_all_tickets(per_page=100, updated_since=updated_since))
             tickets = [_map_ticket(t) for t in raw]
             for t in tickets:
                 await _upsert(session, TicketRow, t.model_dump())
@@ -119,7 +137,7 @@ async def run_full_sync() -> dict:
     counts: dict = {}
 
     async def _do(session_factory):
-        raw_tickets = await zammad.get_all_tickets(per_page=100)
+        raw_tickets = await _with_sla_details(await zammad.get_all_tickets(per_page=100))
         raw_users = await zammad.get_users(per_page=200)
         raw_groups = await zammad.get_groups()
 

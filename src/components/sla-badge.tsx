@@ -11,9 +11,12 @@ interface Props {
 
 const MAP: Record<SlaStatus, { variant: "success" | "warning" | "destructive" | "secondary"; label: string; dot: string }> = {
   safe: { variant: "success", label: "On Track", dot: "bg-emerald-500" },
-  warning: { variant: "warning", label: "At Risk", dot: "bg-amber-500" },
+  on_track: { variant: "success", label: "On Track", dot: "bg-emerald-500" },
+  warning: { variant: "warning", label: "Warning", dot: "bg-amber-500" },
   critical: { variant: "destructive", label: "Critical", dot: "bg-orange-500" },
   breached: { variant: "destructive", label: "Breached", dot: "bg-red-600" },
+  no_sla: { variant: "secondary", label: "No SLA", dot: "bg-muted-foreground" },
+  closed_on_time: { variant: "success", label: "Closed on time", dot: "bg-emerald-500" },
 };
 
 export function SlaBadge({ status, remainingSecs, compact, className }: Props) {

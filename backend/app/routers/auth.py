@@ -12,6 +12,8 @@ from app.zammad_client import zammad
 
 router = APIRouter()
 
+ALLOWED_LOGIN = "helpdeskadmin@mti-tech.co.id"
+
 
 def _map_role(zammad_user: dict) -> Role:
     """Map Zammad roles/tags to internal role."""
@@ -48,6 +50,8 @@ def _map_user(z: dict, role: Role) -> UserOut:
 
 @router.post("/login", response_model=TokenResponse)
 async def login(body: LoginRequest, db: Annotated[AsyncSession, Depends(get_db)]):
+    if body.login.lower() != ALLOWED_LOGIN:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
     zammad_user = await zammad.authenticate(body.login, body.password)
     if not zammad_user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")

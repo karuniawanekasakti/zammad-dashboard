@@ -10,15 +10,34 @@ from app.cache import cache_get, cache_set
 from app.db_models import TicketRow
 from app.deps import get_current_user, get_db
 from app.models import ApiResponse, TicketArticleOut, TicketOut
-from app.repositories import get_articles_for_ticket, list_tickets as list_ticket_rows, upsert_articles, upsert_ticket
+from app.repositories import get_articles_for_ticket, list_groups as list_group_rows, list_tickets as list_ticket_rows, upsert_articles, upsert_ticket
 from app.ticket_table import apply_advanced_filters, apply_table_sorts
 from app.zammad_client import zammad
 
 router = APIRouter()
+history_router = APIRouter()
 
 OPEN_STATES = {"new", "open", "pending"}
 
 SYNC_WATERMARK_KEY = "sync:last_ticket_updated_at"
+
+SEVERITY_LABELS = {
+    "p01": "P1 - Critical",
+    "p02": "P2 - High",
+    "p03": "P3 - Medium",
+    "p04": "P4 - Low",
+    "BRI01": "BRI Critical 1 (0-30 KM)",
+    "BRI02": "BRI Critical 2 (30-60 KM)",
+    "BRI03": "BRI Critical 3 (60-120 KM)",
+    "BRI04": "BRI Critical 4 (120-200 KM)",
+}
+
+TICKET_CATEGORY_LABELS = {
+    "HSU": "Hardware Software Update",
+    "SRSM": "Service Request Support and Management",
+    "SPMS": "SparePart Management System",
+    "Reporting": "Reporting",
+}
 
 
 def _zammad_name(value, default: str) -> str:
@@ -26,6 +45,22 @@ def _zammad_name(value, default: str) -> str:
         value = value.get("name", default)
     name = str(value or default).lower().strip()
     return name.split(" ", 1)[1] if name[:1].isdigit() and " " in name else name
+
+
+def _custom_field_value(value) -> str | None:
+    if isinstance(value, dict):
+        value = value.get("name") or value.get("value") or value.get("label")
+    return str(value) if value not in (None, "", [], {}) else None
+
+
+def _field_label(value: str | None, labels: dict[str, str]) -> str | None:
+    return labels.get(value) if value else None
+
+
+def _int_or_none(value) -> int | None:
+    if value in (None, ""):
+        return None
+    return int(value)
 
 
 def _map_priority(value) -> str:
@@ -40,22 +75,50 @@ def _map_state(value) -> str:
     return name if name in {"new", "open", "pending", "closed", "merged"} else "open"
 
 
+def _parse_zammad_dt(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def _sla_bucket(remaining: int | None) -> str:
+    if remaining is None:
+        return "safe"
+    if remaining < 0:
+        return "breached"
+    if remaining < 1800:
+        return "critical"
+    if remaining < 7200:
+        return "warning"
+    return "safe"
+
+
+def _expanded_name(value, fallback: str | None = None) -> str | None:
+    if isinstance(value, dict):
+        full_name = " ".join(part for part in (value.get("firstname"), value.get("lastname")) if part)
+        return value.get("name") or full_name or value.get("login") or fallback
+    if isinstance(value, str):
+        return value
+    return fallback
+
+
 def _map_ticket(t: dict) -> TicketOut:
     """Map Zammad ticket JSON to our schema."""
-    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
+    escalation_at = _parse_zammad_dt(t.get("escalation_at"))
+    first_response_deadline = _parse_zammad_dt(t.get("first_response_escalation_at") or t.get("sla_response_at"))
+    close_deadline = _parse_zammad_dt(t.get("close_escalation_at") or t.get("solution_escalation_at") or t.get("sla_solution_at"))
+    deadline = escalation_at or first_response_deadline or close_deadline
+    remaining = int((deadline - now).total_seconds()) if deadline else None
+    first_response_diff = _int_or_none(t.get("first_response_diff_in_min"))
+    close_diff = _int_or_none(t.get("close_diff_in_min"))
+    first_response_breached = bool(first_response_diff is not None and first_response_diff < 0) or bool(first_response_deadline and first_response_deadline < now)
+    close_breached = bool(close_diff is not None and close_diff < 0) or bool(close_deadline and close_deadline < now)
+    sla_status = "breached" if (remaining is not None and remaining < 0) or close_breached else _sla_bucket(remaining)
 
-    remaining = None
-    sla_status = "safe"
-    escalation_at = t.get("first_response_escalation_at")
-    if escalation_at:
-        deadline = datetime.fromisoformat(escalation_at.replace("Z", "+00:00"))
-        remaining = int((deadline - datetime.now(timezone.utc)).total_seconds())
-        if remaining < 0:
-            sla_status = "breached"
-        elif remaining < 1800:
-            sla_status = "critical"
-        elif remaining < 7200:
-            sla_status = "warning"
+    severity = _custom_field_value(t.get("priority_case"))
+    ticket_category = _custom_field_value(t.get("ticket_category"))
 
     return TicketOut(
         id=str(t["id"]),
@@ -64,16 +127,33 @@ def _map_ticket(t: dict) -> TicketOut:
         title=t.get("title") or "",
         state=_map_state(t.get("state") or "open"),
         priority=_map_priority(t.get("priority") or "normal"),
+        priority_id=str(t.get("priority_id") or ""),
+        state_id=str(t.get("state_id") or ""),
+        severity=severity,
+        severity_label=_field_label(severity, SEVERITY_LABELS),
+        ticket_category=ticket_category,
+        ticket_category_label=_field_label(ticket_category, TICKET_CATEGORY_LABELS),
         group_id=str(t.get("group_id") or ""),
-        group_name=t.get("group") if isinstance(t.get("group"), str) else str(t.get("group_id") or ""),
+        group_name=_expanded_name(t.get("group"), str(t.get("group_id") or "")) or "",
         owner_id=str(t["owner_id"]) if t.get("owner_id") else None,
-        owner_name=t.get("owner") if isinstance(t.get("owner"), str) else None,
-        customer_name=t.get("customer") if isinstance(t.get("customer"), str) else str(t.get("customer_id") or ""),
+        owner_name=_expanded_name(t.get("owner")),
+        customer_name=_expanded_name(t.get("customer"), str(t.get("customer_id") or "")) or "",
         tags=t.get("tags") if isinstance(t.get("tags"), list) else [],
         sla_status=sla_status,
+        escalation_at=escalation_at,
+        first_response_at=_parse_zammad_dt(t.get("first_response_at")),
+        first_response_escalation_at=first_response_deadline,
+        first_response_in_min=_int_or_none(t.get("first_response_in_min")),
+        first_response_diff_in_min=first_response_diff,
+        close_at=_parse_zammad_dt(t.get("close_at")),
+        close_escalation_at=close_deadline,
+        close_in_min=_int_or_none(t.get("close_in_min")),
+        close_diff_in_min=close_diff,
+        update_escalation_at=_parse_zammad_dt(t.get("update_escalation_at") or t.get("sla_update_at")),
+        update_diff_in_min=_int_or_none(t.get("update_diff_in_min")),
         first_response_remaining_secs=remaining,
-        first_response_breached=t.get("first_response_in_min") is not None and remaining is not None and remaining < 0,
-        close_breached=bool(t.get("close_escalation_at") and t.get("close_in_min") is not None and (t.get("close_escalation_at") or "") < datetime.now(timezone.utc).isoformat()),
+        first_response_breached=first_response_breached,
+        close_breached=close_breached,
         reopen_count=t.get("reopen_count", 0),
         first_reply_time_secs=t.get("first_reply_time_secs"),
         resolution_time_secs=t.get("resolution_time_secs"),
@@ -112,10 +192,10 @@ def _row_to_ticket(row: TicketRow) -> TicketOut:
     return TicketOut.model_validate(row, from_attributes=True)
 
 
-async def _fetch_scoped(current: dict, db: AsyncSession) -> list[TicketOut]:
+async def _fetch_scoped(current: dict, db: AsyncSession, *, agent_as_all_groups: bool = False) -> list[TicketOut]:
     """Read tickets visible to the current user from PostgreSQL."""
     tickets = [_row_to_ticket(row) for row in await list_ticket_rows(db)]
-    return _scope_filter(tickets, current)
+    return tickets if agent_as_all_groups and current["role"] == "agent" else _scope_filter(tickets, current)
 
 
 def _as_utc(value: datetime | None) -> datetime | None:
@@ -215,6 +295,188 @@ def _apply_ticket_filters(tickets: list[TicketOut], group_id: str | None = None,
     return tickets
 
 
+def _sla_deadline(ticket: TicketOut) -> datetime | None:
+    deadlines = [
+        _as_utc(ticket.escalation_at),
+        _as_utc(ticket.first_response_escalation_at),
+        _as_utc(ticket.update_escalation_at),
+        _as_utc(ticket.close_escalation_at),
+    ]
+    return min((dt for dt in deadlines if dt), default=None)
+
+
+def _effective_sla_status(ticket: TicketOut, now: datetime) -> str:
+    deadline = _sla_deadline(ticket)
+    if not deadline:
+        return "no_sla"
+    closed_at = _as_utc(ticket.close_at or ticket.closed_at)
+    if ticket.state in ("closed", "merged"):
+        return "closed_on_time" if closed_at and closed_at <= deadline else "breached"
+    if ticket.first_response_breached or ticket.close_breached or ticket.sla_status == "breached" or now > deadline:
+        return "breached"
+    remaining = (deadline - now).total_seconds()
+    if remaining <= 30 * 60:
+        return "critical"
+    if remaining <= 2 * 60 * 60:
+        return "warning"
+    return "on_track"
+
+
+def _sla_remaining_ms(ticket: TicketOut, now: datetime) -> int | None:
+    deadline = _sla_deadline(ticket)
+    return int((deadline - now).total_seconds() * 1000) if deadline else None
+
+
+def _sla_progress(ticket: TicketOut, now: datetime) -> int:
+    deadline = _sla_deadline(ticket)
+    created = _as_utc(ticket.zammad_created_at)
+    if not deadline or not created or deadline <= created:
+        return 0
+    return max(0, min(100, round(((now - created).total_seconds() / (deadline - created).total_seconds()) * 100)))
+
+
+def _sla_counts(rows: list[dict]) -> dict:
+    with_sla = [t for t in rows if t["live_sla_status"] != "no_sla"]
+    ok = len([t for t in with_sla if t["live_sla_status"] in ("on_track", "closed_on_time")])
+    return {
+        "total": len(rows),
+        "total_with_sla": len(with_sla),
+        "on_track": len([t for t in rows if t["live_sla_status"] == "on_track"]),
+        "warning": len([t for t in rows if t["live_sla_status"] == "warning"]),
+        "critical": len([t for t in rows if t["live_sla_status"] == "critical"]),
+        "at_risk": len([t for t in rows if t["live_sla_status"] in ("warning", "critical")]),
+        "breached": len([t for t in rows if t["live_sla_status"] == "breached"]),
+        "no_sla": len([t for t in rows if t["live_sla_status"] == "no_sla"]),
+        "compliance_rate": (ok / len(with_sla) * 100) if with_sla else None,
+    }
+
+
+def _sla_row(name: str, rows: list[dict]) -> dict:
+    return {"name": name, **_sla_counts(rows)}
+
+
+def _avg_minutes(values: list[int | None]) -> int | None:
+    nums = [v for v in values if v is not None]
+    return round(sum(nums) / len(nums)) if nums else None
+
+
+def _status_rank(status: str) -> int:
+    return {"breached": 0, "critical": 1, "warning": 2, "on_track": 3, "no_sla": 4}.get(status, 5)
+
+
+def _build_sla_monitor(tickets: list[TicketOut], now: datetime | None = None, group_names: list[str] | None = None) -> dict:
+    now = now or datetime.now(timezone.utc)
+    active = [t for t in tickets if t.state in OPEN_STATES]
+    closed = [t for t in tickets if t.state == "closed"]
+
+    rows = []
+    for ticket in active:
+        status = _effective_sla_status(ticket, now)
+        data = ticket.model_dump(mode="json")
+        data.update({"live_sla_status": status, "sla_remaining_ms": _sla_remaining_ms(ticket, now), "sla_progress": _sla_progress(ticket, now)})
+        rows.append(data)
+
+    closed_rows = []
+    for ticket in closed:
+        status = _effective_sla_status(ticket, now)
+        data = ticket.model_dump(mode="json")
+        data.update({"live_sla_status": status, "sla_remaining_ms": _sla_remaining_ms(ticket, now), "sla_progress": _sla_progress(ticket, now)})
+        closed_rows.append(data)
+
+    summary = _sla_counts(rows)
+    summary.update({
+        "compliance_rate": summary["compliance_rate"] or 0,
+        "total_active": len(active),
+        "sla_total": summary["total_with_sla"],
+        "total_closed_on_time": len([t for t in closed_rows if t["live_sla_status"] == "closed_on_time"]),
+        "avg_resolution_minutes": _avg_minutes([t.close_in_min for t in closed if t.close_at or t.closed_at]),
+        "avg_resolution_mins": _avg_minutes([t.close_in_min for t in closed if t.close_at or t.closed_at]),
+    })
+
+    priorities = ["very high", "high", "normal", "low"]
+    priority_labels = {"very high": "Urgent", "normal": "Medium"}
+    priority_rows = [_sla_row(priority_labels.get(priority, priority), [t for t in rows if t["priority"] == priority]) for priority in priorities]
+    by_priority = {row["name"]: row for row in priority_rows}
+
+    group_names = group_names or sorted({t["group_name"] for t in rows if t["group_name"]})
+    sla_rows = [_sla_row(name, [t for t in rows if t["group_name"] == name]) for name in group_names]
+    by_group = {row["name"]: row for row in sla_rows}
+
+    today = datetime.combine(now.date(), time.min, tzinfo=timezone.utc)
+    day_labels = ["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"]
+    trend = []
+    for i in range(7):
+        start = today - timedelta(days=6 - i)
+        end = start + timedelta(days=1)
+        day_closed = [t for t in closed if (closed_at := _as_utc(t.close_at or t.closed_at)) and start <= closed_at < end]
+        breach_count = len([t for t in day_closed if _effective_sla_status(t, now) == "breached"])
+        trend.append({"date": start.date().isoformat(), "day": day_labels[start.weekday() + 1 if start.weekday() < 6 else 0], "rate": ((len(day_closed) - breach_count) / len(day_closed) * 100) if day_closed else 0, "total": len(day_closed), "breach": breach_count})
+
+    grid = [[0 for _ in range(24)] for _ in range(7)]
+    for ticket in active:
+        if _effective_sla_status(ticket, now) != "breached":
+            continue
+        dt = _sla_deadline(ticket) or _as_utc(ticket.zammad_updated_at)
+        if dt:
+            grid[dt.weekday()][dt.hour] += 1
+
+    rows.sort(key=lambda t: (_status_rank(t["live_sla_status"]), t["sla_remaining_ms"] if t["sla_remaining_ms"] is not None else 10**15))
+    breach_log = [t for t in closed if _effective_sla_status(t, now) == "breached"]
+    breach_log.sort(key=lambda t: _as_utc(t.close_at or t.closed_at) or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+
+    return {
+        **summary,
+        "summary": summary,
+        "by_priority": by_priority,
+        "by_group": by_group,
+        "priority_rows": priority_rows,
+        "sla_rows": sla_rows,
+        "trend": trend,
+        "heatmap": {"grid": grid, "max": max(1, *(value for row in grid for value in row))},
+        "tickets": rows,
+        "risk_rows": [t for t in rows if t["live_sla_status"] in ("breached", "critical", "warning")],
+        "breach_log": [t.model_dump(mode="json") for t in breach_log],
+    }
+
+
+def _state_ids(query: str) -> set[str] | None:
+    marker = "state_id:("
+    start = query.find(marker)
+    if start < 0:
+        return None
+    end = query.find(")", start)
+    if end < 0:
+        return None
+    return {value.strip() for value in query[start + len(marker):end].split(",") if value.strip()}
+
+
+def _ticket_matches_limited_search(ticket: TicketOut, query: str, now: datetime) -> bool:
+    states = _state_ids(query)
+    if states and (ticket.state_id or {"new": "1", "open": "2", "pending": "3", "closed": "4"}.get(str(ticket.state), "")) not in states:
+        return False
+    if "close_at:[now-7d TO now]" in query:
+        close_at = _as_utc(ticket.close_at or ticket.closed_at)
+        return bool(close_at and now - timedelta(days=7) <= close_at <= now)
+    return True
+
+
+@router.get("/search", response_model=ApiResponse)
+async def search_tickets(
+    current: Annotated[dict, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    query: str,
+    page: int = Query(1, ge=1),
+    per_page: int = Query(20, ge=1, le=100),
+):
+    # ponytail: this covers SLA monitor's Zammad query subset; proxy/parse wider search syntax when another page needs it.
+    now = datetime.now(timezone.utc)
+    rows = [t for t in await _fetch_scoped(current, db) if _ticket_matches_limited_search(t, query, now)]
+    rows.sort(key=lambda t: t.zammad_updated_at, reverse=True)
+    total = len(rows)
+    page_rows = rows[(page - 1) * per_page : page * per_page]
+    return ApiResponse(data=[t.model_dump(mode="json") for t in page_rows], meta={"page": page, "per_page": per_page, "total": total})
+
+
 @router.get("", response_model=ApiResponse)
 async def list_tickets(
     current: Annotated[dict, Depends(get_current_user)],
@@ -257,6 +519,17 @@ async def sla_at_risk(current: Annotated[dict, Depends(get_current_user)], db: A
     at_risk = [t for t in tickets if t.sla_status in ("warning", "critical", "breached")]
     at_risk.sort(key=lambda t: t.first_response_remaining_secs or 999999)
     return ApiResponse(data=[t.model_dump(mode="json") for t in at_risk[:50]])
+
+
+@router.get("/sla-monitor", response_model=ApiResponse)
+async def sla_monitor(current: Annotated[dict, Depends(get_current_user)], db: Annotated[AsyncSession, Depends(get_db)], group_id: str | None = None):
+    tickets = _apply_ticket_filters(await _fetch_scoped(current, db, agent_as_all_groups=not group_id or group_id == "all"), group_id)
+    if group_id and group_id != "all":
+        group_names = sorted({t.group_name for t in tickets if t.group_name})
+    else:
+        visible_ids = {t.group_id for t in tickets}
+        group_names = sorted(g.name for g in await list_group_rows(db) if current["role"] in ("admin", "agent") or g.id in visible_ids or g.id in current.get("group_ids", []))
+    return ApiResponse(data=_build_sla_monitor(tickets, group_names=group_names))
 
 
 @router.get("/overview", response_model=ApiResponse)
@@ -358,3 +631,16 @@ async def get_ticket(ticket_id: int, current: Annotated[dict, Depends(get_curren
     result = {"ticket": ticket.model_dump(mode="json"), "articles": [TicketArticleOut.model_validate(a, from_attributes=True).model_dump() for a in articles]}
     await cache_set(f"ticket:{ticket_id}", result, ttl=60)
     return ApiResponse(data=result)
+
+
+@history_router.get("/ticket_history/{ticket_id}", response_model=ApiResponse)
+async def get_ticket_history(ticket_id: int, current: Annotated[dict, Depends(get_current_user)], db: Annotated[AsyncSession, Depends(get_db)]):
+    row = await db.get(TicketRow, str(ticket_id))
+    if row is None or not _scope_filter([_row_to_ticket(row)], current):
+        return ApiResponse(data=[])
+
+    try:
+        history = await zammad.get_ticket_history(ticket_id)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="Failed to fetch ticket history") from exc
+    return ApiResponse(data=history)

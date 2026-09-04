@@ -50,10 +50,8 @@ export default function LoginPage() {
     <div className="min-h-screen grid lg:grid-cols-2 bg-muted/40">
       <div className="hidden lg:flex flex-col justify-between p-10 bg-sidebar text-sidebar-foreground relative overflow-hidden">
         <div className="flex items-center gap-2 relative z-10">
-          <div className="size-8 rounded-md bg-primary text-primary-foreground flex items-center justify-center font-bold">
-            Z
-          </div>
-          <span className="font-semibold">Zammad Monitor</span>
+          <img src="/mti-logo.png" alt="MTI" className="size-8 rounded-md object-contain bg-white" />
+          <span className="font-semibold">MTI Ticketing Dashboard</span>
         </div>
         <div className="relative z-10 space-y-4 max-w-md">
           <h2 className="text-3xl font-bold leading-tight">Real-time helpdesk intelligence.</h2>

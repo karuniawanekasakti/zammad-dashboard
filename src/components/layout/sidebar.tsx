@@ -44,11 +44,16 @@ export function Sidebar({ role, collapsed }: { role: Role; collapsed: boolean })
         collapsed ? "w-14" : "w-60"
       )}
     >
-      <div className="flex h-14 items-center gap-2 px-4 border-b border-sidebar-border">
-        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground text-sm font-bold">
-          Z
-        </div>
-        {!collapsed && <span className="truncate font-semibold">Zammad Monitor</span>}
+      <div className="flex items-center gap-3 px-4 py-3.5 border-b border-sidebar-border">
+        <img src="/mti-logo.png" alt="MTI" className="h-9 w-9 shrink-0 rounded-lg object-contain bg-white shadow-sm ring-1 ring-black/10" />
+        {!collapsed && (
+          <div className="flex flex-col leading-tight">
+            <span className="text-[15px] font-bold tracking-tight">MTI</span>
+            <span className="text-[11px] font-medium uppercase tracking-widest text-sidebar-foreground/60">
+              Ticketing Dashboard
+            </span>
+          </div>
+        )}
       </div>
       <nav className="flex-1 overflow-y-auto p-2 space-y-0.5">
         {items.map((item) => (

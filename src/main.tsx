@@ -21,7 +21,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <ThemeProvider defaultTheme="system" storageKey="zm-theme">
       <QueryClientProvider client={queryClient}>
-        <BrowserRouter>
+        <BrowserRouter basename={(import.meta.env.VITE_BASE_PATH ?? "/").replace(/\/$/, "") || "/"}>
           <App />
           <Toaster richColors closeButton position="top-right" />
         </BrowserRouter>

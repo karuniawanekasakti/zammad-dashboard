@@ -3,14 +3,16 @@ FROM node:20-alpine AS build
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm ci
+RUN npm ci --legacy-peer-deps
 
 COPY . .
 
 ARG VITE_USE_BACKEND=true
+ARG VITE_BASE_PATH=/
 ARG VITE_API_BASE=/api/v1
 ARG VITE_WS_BASE
 ENV VITE_USE_BACKEND=$VITE_USE_BACKEND
+ENV VITE_BASE_PATH=$VITE_BASE_PATH
 ENV VITE_API_BASE=$VITE_API_BASE
 
 RUN if [ -n "$VITE_WS_BASE" ]; then export VITE_WS_BASE; else unset VITE_WS_BASE; fi; npm run build

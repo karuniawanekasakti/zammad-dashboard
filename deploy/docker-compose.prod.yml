@@ -1,6 +1,6 @@
 x-prod-backend-env: &prod-backend-env
   env_file:
-    - ../.env
+    - .env
   environment:
     ZAMMAD_BASE_URL: "${ZAMMAD_BASE_URL:?set ZAMMAD_BASE_URL in .env}"
     ZAMMAD_API_TOKEN: "${ZAMMAD_API_TOKEN:?set ZAMMAD_API_TOKEN in .env}"
@@ -42,10 +42,11 @@ services:
 
   web:
     build:
-      context: ..
+      context: .
       dockerfile: deploy/Dockerfile.frontend
       args:
         VITE_USE_BACKEND: "true"
+        VITE_BASE_PATH: "${VITE_BASE_PATH:-/}"
         VITE_API_BASE: "${VITE_API_BASE:-/api/v1}"
         VITE_WS_BASE: "${VITE_WS_BASE:-}"
     ports:

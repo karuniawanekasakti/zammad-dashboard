@@ -92,6 +92,17 @@ class TicketArticleRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class TicketHistoryRow(Base):
+    __tablename__ = "ticket_history"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    ticket_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    attribute: Mapped[str | None] = mapped_column(String(100))
+    value_from: Mapped[str | None] = mapped_column(Text)
+    value_to: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class AlertRuleRow(Base):
     __tablename__ = "alert_rules"
 

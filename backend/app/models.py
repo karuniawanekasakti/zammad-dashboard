@@ -112,6 +112,15 @@ class TicketArticleOut(BaseModel):
     created_at: datetime
 
 
+class TicketHistoryOut(BaseModel):
+    id: str
+    ticket_id: str
+    attribute: str | None = None
+    value_from: str | None = None
+    value_to: str | None = None
+    created_at: datetime
+
+
 class TicketListResponse(BaseModel):
     success: bool = True
     data: list[TicketOut]

@@ -201,13 +201,13 @@ export interface OverviewPoint {
   label: string;
   created: number;
   closed: number;
-  reopened: number;
+  open: number;
   backlog: number;
 }
 
 export interface OverviewData {
   chart: OverviewPoint[];
-  totals: { created: number; closed: number; reopened: number; backlog: number };
+  totals: { created: number; closed: number; open: number; backlog: number };
   tickets: Ticket[];
   total: number;
   groups: string[];

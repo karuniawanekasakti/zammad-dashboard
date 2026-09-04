@@ -20,7 +20,7 @@ from app.config import settings
 from app.repositories import get_setting, set_setting
 from app.routers.agents import _group_ids, _map_agent
 from app.routers.groups import _map_group
-from app.routers.tickets import OPEN_STATES, _map_article, _map_state, _map_ticket
+from app.routers.tickets import OPEN_STATES, _map_article, _map_history, _map_state, _map_ticket
 from app.zammad_client import zammad
 
 SYNC_WATERMARK_KEY = "sync:last_ticket_updated_at"
@@ -48,6 +48,33 @@ async def _with_sla_details(raw_tickets: list[dict]) -> list[dict]:
         except Exception:
             rows.append(ticket)
     return rows
+
+
+async def _sync_ticket_histories(session, ticket_ids: list[int]) -> int:
+    """Fetch each ticket's history from Zammad and upsert the entries.
+
+    One HTTP call per ticket (Zammad has no bulk history endpoint); failures are
+    swallowed so one bad ticket can't fail the whole sync. Idempotent: rows are
+    keyed by Zammad's history entry id, so re-runs upsert instead of duplicating.
+    """
+    from app.db_models import TicketHistoryRow
+    from app.repositories import _upsert
+
+    synced = 0
+    for ticket_id in ticket_ids:
+        try:
+            rows = _map_history(await zammad.get_ticket_history(ticket_id), ticket_id)
+            for row in rows:
+                await _upsert(session, TicketHistoryRow, row.model_dump())
+            # Commit per ticket: history syncs thousands of rows over a long run, so a
+            # single end-of-run commit would hold a table lock for the whole run and
+            # lose all progress if interrupted. Per-ticket commits make it resumable.
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            continue
+        synced += 1
+    return synced
 
 
 async def _with_engine(db_coro: Callable[[async_sessionmaker], Awaitable]):
@@ -115,6 +142,8 @@ async def run_incremental_sync() -> dict:
             tickets = [_map_ticket(t) for t in raw]
             for t in tickets:
                 await _upsert(session, TicketRow, t.model_dump())
+            # Refresh history only for tickets that changed since the watermark.
+            await _sync_ticket_histories(session, [t["id"] for t in raw])
             await session.commit()
             # Advance watermark to now, not to a ticket's updated_at (a stale ticket
             # would pin the watermark to the past and stall future increments).
@@ -152,6 +181,9 @@ async def run_full_sync() -> dict:
                 await _upsert(session, UserRow, u.model_dump(mode="json"))
             for g in groups:
                 await _upsert(session, GroupRow, g.model_dump(mode="json"))
+            # ponytail: one history call per ticket; this is the backfill path for
+            # accurate open-at timestamps, so it's slow on first run by design.
+            await _sync_ticket_histories(session, [t["id"] for t in raw_tickets])
             await session.commit()
             await set_setting(session, SYNC_WATERMARK_KEY, {"value": datetime.now(timezone.utc).isoformat()})
 
@@ -178,6 +210,7 @@ async def sync_ticket_core(ticket_id: int) -> dict | None:
             await _upsert(session, TicketRow, ticket.model_dump())
             for a in articles:
                 await _upsert(session, TicketArticleRow, a.model_dump())
+            await _sync_ticket_histories(session, [ticket_id])
             await session.commit()
         return {"ticket": ticket.model_dump(mode="json"), "articles": [a.model_dump() for a in articles]}
 

@@ -9,8 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.cache import cache_get, cache_set
 from app.db_models import TicketRow
 from app.deps import get_current_user, get_db
-from app.models import ApiResponse, TicketArticleOut, TicketOut
-from app.repositories import get_articles_for_ticket, list_groups as list_group_rows, list_tickets as list_ticket_rows, upsert_articles, upsert_ticket
+from app.models import ApiResponse, TicketArticleOut, TicketHistoryOut, TicketOut
+from app.repositories import get_articles_for_ticket, get_state_history, list_groups as list_group_rows, list_tickets as list_ticket_rows, upsert_articles, upsert_ticket
 from app.ticket_table import apply_advanced_filters, apply_table_sorts
 from app.zammad_client import zammad
 
@@ -177,6 +177,27 @@ def _map_article(a: dict, ticket_id: int) -> TicketArticleOut:
     )
 
 
+def _map_history(payload, ticket_id: int) -> list[TicketHistoryOut]:
+    """Map a Zammad ticket-history payload ({history:[...], assets:{...}}) to rows."""
+    entries = payload.get("history", []) if isinstance(payload, dict) else payload
+    rows = []
+    for e in entries or []:
+        if not isinstance(e, dict) or e.get("id") is None:
+            continue
+        created_at = _parse_zammad_dt(e.get("created_at"))
+        if created_at is None:
+            continue
+        rows.append(TicketHistoryOut(
+            id=str(e["id"]),
+            ticket_id=str(e.get("o_id") or ticket_id),
+            attribute=e.get("attribute"),
+            value_from=None if e.get("value_from") is None else str(e.get("value_from")),
+            value_to=None if e.get("value_to") is None else str(e.get("value_to")),
+            created_at=created_at,
+        ))
+    return rows
+
+
 def _scope_filter(tickets: list[TicketOut], user: dict) -> list[TicketOut]:
     """Apply role-based scoping."""
     role = user["role"]
@@ -214,7 +235,7 @@ def _overview_buckets(period: str, year: int, month: int | None = None, week: st
                 "end": datetime(year + (month == 12), 1 if month == 12 else month + 1, 1, tzinfo=timezone.utc),
                 "created": 0,
                 "closed": 0,
-                "reopened": 0,
+                "open": 0,
                 "backlog": 0,
             }
             for month in range(1, 13)
@@ -229,7 +250,7 @@ def _overview_buckets(period: str, year: int, month: int | None = None, week: st
                 "end": datetime(year, month, day, tzinfo=timezone.utc) + timedelta(days=1),
                 "created": 0,
                 "closed": 0,
-                "reopened": 0,
+                "open": 0,
                 "backlog": 0,
             }
             for day in range(1, monthrange(year, month)[1] + 1)
@@ -252,7 +273,7 @@ def _overview_buckets(period: str, year: int, month: int | None = None, week: st
                 "end": start + timedelta(days=i + 1),
                 "created": 0,
                 "closed": 0,
-                "reopened": 0,
+                "open": 0,
                 "backlog": 0,
             }
             for i in range(7)
@@ -270,7 +291,7 @@ def _overview_buckets(period: str, year: int, month: int | None = None, week: st
             "end": start + timedelta(hours=hour + 1),
             "created": 0,
             "closed": 0,
-            "reopened": 0,
+            "open": 0,
             "backlog": 0,
         }
         for hour in range(24)
@@ -284,6 +305,19 @@ def _bucket_index(buckets: list[dict], value: datetime | None) -> int | None:
     for index, bucket in enumerate(buckets):
         if bucket["start"] <= value < bucket["end"]:
             return index
+    return None
+
+
+def _first_open_at(ticket: TicketOut, open_events: dict[str, datetime]) -> datetime | None:
+    """When the ticket first entered Open. Prefers synced state history; falls back
+    to creation time for tickets with no history yet (or that were created open)."""
+    event_at = open_events.get(ticket.id)
+    if event_at is not None:
+        return event_at
+    # No history row: a ticket not in "new" (or one that reopened) has passed
+    # through open; approximate with its creation time until history is synced.
+    if ticket.state != "new" or ticket.reopen_count > 0:
+        return _as_utc(ticket.zammad_created_at)
     return None
 
 
@@ -550,25 +584,34 @@ async def overview(
     buckets = _overview_buckets(period, year, month, week, day)
     window_start, window_end = buckets[0]["start"], buckets[-1]["end"]
     tickets = _apply_ticket_filters(await _fetch_scoped(current, db), group_id, owner_id)
-    rows = []
 
+    # Earliest synced "became open" timestamp per ticket (value_to == "open").
+    open_events: dict[str, datetime] = {}
+    for h in await get_state_history(db):
+        if h.value_to != "open":
+            continue
+        ts = _as_utc(h.created_at)
+        if ts is not None and (h.ticket_id not in open_events or ts < open_events[h.ticket_id]):
+            open_events[h.ticket_id] = ts
+
+    rows = []
     for ticket in tickets:
         created_idx = _bucket_index(buckets, ticket.zammad_created_at)
         closed_idx = _bucket_index(buckets, ticket.closed_at)
-        # ponytail: tickets only store reopen_count, not reopen event history; use updated_at until reopen events are synced.
-        reopened_idx = _bucket_index(buckets, ticket.zammad_updated_at) if ticket.reopen_count > 0 else None
+        open_at = _first_open_at(ticket, open_events)
+        open_idx = _bucket_index(buckets, open_at)
 
         if created_idx is not None:
             buckets[created_idx]["created"] += 1
         if closed_idx is not None:
             buckets[closed_idx]["closed"] += 1
-        if reopened_idx is not None:
-            buckets[reopened_idx]["reopened"] += 1
+        if open_idx is not None:
+            buckets[open_idx]["open"] += 1
 
         timestamps = [
             _as_utc(ticket.zammad_created_at),
             _as_utc(ticket.closed_at),
-            _as_utc(ticket.zammad_updated_at) if ticket.reopen_count > 0 else None,
+            open_at,
         ]
         if any(ts and window_start <= ts < window_end for ts in timestamps):
             rows.append(ticket)
@@ -581,14 +624,14 @@ async def overview(
     rows.sort(key=lambda t: t.zammad_updated_at, reverse=True)
     total = len(rows)
     page_rows = rows[(page - 1) * per_page : page * per_page]
-    chart = [{k: bucket[k] for k in ("label", "created", "closed", "reopened", "backlog")} for bucket in buckets]
+    chart = [{k: bucket[k] for k in ("label", "created", "closed", "open", "backlog")} for bucket in buckets]
 
     return ApiResponse(data={
         "chart": chart,
         "totals": {
             "created": sum(point["created"] for point in chart),
             "closed": sum(point["closed"] for point in chart),
-            "reopened": sum(point["reopened"] for point in chart),
+            "open": sum(point["open"] for point in chart),
             "backlog": backlog,
         },
         "tickets": [t.model_dump(mode="json") for t in page_rows],
@@ -614,10 +657,11 @@ async def get_ticket(ticket_id: int, current: Annotated[dict, Depends(get_curren
             ticket = _map_ticket(raw)
             await upsert_ticket(db, ticket)
 
-            from app.repositories import upsert_articles as _upsert_articles
+            from app.repositories import upsert_articles as _upsert_articles, upsert_history as _upsert_history
             articles_raw = await zammad.get_ticket_articles(ticket_id)
             articles = [_map_article(a, ticket_id) for a in articles_raw]
             await _upsert_articles(db, articles)
+            await _upsert_history(db, _map_history(await zammad.get_ticket_history(ticket_id), ticket_id))
             await db.commit()
             row = TicketRow(**ticket.model_dump())
         except Exception:

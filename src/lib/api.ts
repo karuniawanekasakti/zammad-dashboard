@@ -259,12 +259,12 @@ function buildMockSlaMonitor(rows: Ticket[]): SlaMonitorData {
 function overviewBuckets(period: OverviewPeriod, year: number, month?: number, week?: string, day?: string) {
   const now = new Date();
   if (period === "year") {
-    return Array.from({ length: 12 }, (_, i) => ({ label: new Date(year, i, 1).toLocaleString("en", { month: "short" }), start: new Date(year, i, 1), end: new Date(year, i + 1, 1), created: 0, closed: 0, reopened: 0, backlog: 0 }));
+    return Array.from({ length: 12 }, (_, i) => ({ label: new Date(year, i, 1).toLocaleString("en", { month: "short" }), start: new Date(year, i, 1), end: new Date(year, i + 1, 1), created: 0, closed: 0, open: 0, backlog: 0 }));
   }
   const selectedMonth = month ? month - 1 : year === now.getFullYear() ? now.getMonth() : 0;
   if (period === "month") {
     const days = new Date(year, selectedMonth + 1, 0).getDate();
-    return Array.from({ length: days }, (_, i) => ({ label: String(i + 1), start: new Date(year, selectedMonth, i + 1), end: new Date(year, selectedMonth, i + 2), created: 0, closed: 0, reopened: 0, backlog: 0 }));
+    return Array.from({ length: days }, (_, i) => ({ label: String(i + 1), start: new Date(year, selectedMonth, i + 1), end: new Date(year, selectedMonth, i + 2), created: 0, closed: 0, open: 0, backlog: 0 }));
   }
   if (period === "week") {
     const base = week ? dateFromWeekInput(week) : year === now.getFullYear() ? now : new Date(year, 0, 1);
@@ -276,12 +276,12 @@ function overviewBuckets(period: OverviewPeriod, year: number, month?: number, w
       day.setDate(start.getDate() + i);
       const end = new Date(day);
       end.setDate(day.getDate() + 1);
-      return { label: day.toLocaleString("en", { weekday: "short" }), start: day, end, created: 0, closed: 0, reopened: 0, backlog: 0 };
+      return { label: day.toLocaleString("en", { weekday: "short" }), start: day, end, created: 0, closed: 0, open: 0, backlog: 0 };
     });
   }
   const selectedDay = day ? new Date(`${day}T00:00:00`) : year === now.getFullYear() ? now : new Date(year, 0, 1);
   selectedDay.setHours(0, 0, 0, 0);
-  return Array.from({ length: 24 }, (_, hour) => ({ label: `${String(hour).padStart(2, "0")}:00`, start: new Date(selectedDay.getTime() + hour * 3600000), end: new Date(selectedDay.getTime() + (hour + 1) * 3600000), created: 0, closed: 0, reopened: 0, backlog: 0 }));
+  return Array.from({ length: 24 }, (_, hour) => ({ label: `${String(hour).padStart(2, "0")}:00`, start: new Date(selectedDay.getTime() + hour * 3600000), end: new Date(selectedDay.getTime() + (hour + 1) * 3600000), created: 0, closed: 0, open: 0, backlog: 0 }));
 }
 
 function dateFromWeekInput(value: string) {
@@ -428,12 +428,17 @@ const mockApi = {
     for (const ticket of scopedTickets) {
       const created = bucketIndex(buckets, ticket.zammad_created_at);
       const closed = bucketIndex(buckets, ticket.closed_at);
-      const reopened = ticket.reopen_count > 0 ? bucketIndex(buckets, ticket.zammad_updated_at) : -1;
+      // "open" = tickets that have ever been in the Open status. Mock data has no
+      // state history, so approximate entered-open with the last update for
+      // reopened tickets and creation time otherwise (mirrors backend fallback).
+      const everOpen = ticket.state !== "new" || ticket.reopen_count > 0;
+      const openAt = !everOpen ? null : ticket.reopen_count > 0 ? ticket.zammad_updated_at : ticket.zammad_created_at;
+      const open = bucketIndex(buckets, openAt);
       if (created >= 0) buckets[created].created += 1;
       if (closed >= 0) buckets[closed].closed += 1;
-      if (reopened >= 0) buckets[reopened].reopened += 1;
+      if (open >= 0) buckets[open].open += 1;
 
-      const times = [ticket.zammad_created_at, ticket.closed_at, ticket.reopen_count > 0 ? ticket.zammad_updated_at : null]
+      const times = [ticket.zammad_created_at, ticket.closed_at, openAt]
         .filter(Boolean)
         .map((v) => new Date(v!).getTime());
       if (times.some((t) => start <= t && t < end)) rows.push(ticket);
@@ -442,7 +447,7 @@ const mockApi = {
     let backlog = 0;
     const chart = buckets.map((bucket) => {
       backlog += bucket.created - bucket.closed;
-      return { label: bucket.label, created: bucket.created, closed: bucket.closed, reopened: bucket.reopened, backlog };
+      return { label: bucket.label, created: bucket.created, closed: bucket.closed, open: bucket.open, backlog };
     });
     rows.sort((a, b) => new Date(b.zammad_updated_at).getTime() - new Date(a.zammad_updated_at).getTime());
     const page = params.page ?? 1;
@@ -452,7 +457,7 @@ const mockApi = {
       totals: {
         created: chart.reduce((n, p) => n + p.created, 0),
         closed: chart.reduce((n, p) => n + p.closed, 0),
-        reopened: chart.reduce((n, p) => n + p.reopened, 0),
+        open: chart.reduce((n, p) => n + p.open, 0),
         backlog,
       },
       tickets: rows.slice((page - 1) * pageSize, page * pageSize),

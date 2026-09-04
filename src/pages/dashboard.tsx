@@ -66,7 +66,7 @@ const TICKET_COUNT_COLORS = {
   created: "hsl(var(--primary))",
   closed: "hsl(142 76% 45%)",
   backlog: "hsl(200 80% 55%)",
-  reopened: "hsl(32 95% 50%)",
+  open: "hsl(32 95% 50%)",
 };
 
 export default function DashboardPage() {

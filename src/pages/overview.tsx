@@ -33,13 +33,13 @@ const COLORS = {
   created: "hsl(var(--primary))",
   closed: "hsl(142 76% 45%)",
   backlog: "hsl(200 80% 55%)",
-  reopened: "hsl(32 95% 50%)",
+  open: "hsl(32 95% 50%)",
 };
 const METRICS = [
   { key: "created", label: "Created" },
   { key: "closed", label: "Closed" },
   { key: "backlog", label: "Backlog" },
-  { key: "reopened", label: "Reopened" },
+  { key: "open", label: "Open" },
 ] as const;
 const PERIODS: { value: OverviewPeriod; label: string }[] = [
   { value: "year", label: "Year" },
@@ -64,7 +64,7 @@ export default function OverviewPage() {
     created: true,
     closed: true,
     backlog: false,
-    reopened: false,
+    open: false,
   });
   const [groupFilter, setGroupFilter] = useState("all");
   const [agentFilter, setAgentFilter] = useState("all");
@@ -91,7 +91,7 @@ export default function OverviewPage() {
 
   const downloadCsv = async () => {
     const exportData = await api.getOverview(scope, { period, year, month, week, day, group_id: groupFilter, owner_id: agentFilter, page: 1, page_size: EXPORT_SIZE });
-    const header = ["Number", "Title", "State", "Priority", "Group", "Agent", "Created", "Closed", "Reopened"];
+    const header = ["Number", "Title", "State", "Priority", "Group", "Agent", "Created", "Closed", "Open"];
     const lines = [header, ...exportData.tickets.map(csvRow)].map((row) => row.map(csvCell).join(","));
     const url = URL.createObjectURL(new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" }));
     const link = document.createElement("a");
@@ -164,7 +164,7 @@ export default function OverviewPage() {
         <ChartCard
           className="lg:col-span-2"
           title="Ticket count"
-          description="Created, closed, backlog and reopened tickets over time."
+          description="Created, closed, backlog and open tickets over time."
           action={
             <PeriodFilter
               period={period}
@@ -202,7 +202,7 @@ export default function OverviewPage() {
         <TabsList>
           <TabsTrigger value="created">Created</TabsTrigger>
           <TabsTrigger value="closed">Closed</TabsTrigger>
-          <TabsTrigger value="reopened">Reopened</TabsTrigger>
+          <TabsTrigger value="open">Open</TabsTrigger>
         </TabsList>
       </Tabs>
 
@@ -347,6 +347,13 @@ function csvCell(value: string) {
 }
 
 function dateFor(ticket: Ticket, metric: Exclude<Metric, "backlog">) {
-  const value = metric === "closed" ? ticket.closed_at : metric === "reopened" ? ticket.zammad_updated_at : ticket.zammad_created_at;
+  // Open shows when the ticket actually entered open: last update for reopened
+  // tickets (closest available proxy), creation time otherwise. Mirrors backend.
+  const value =
+    metric === "closed"
+      ? ticket.closed_at
+      : metric === "open" && ticket.reopen_count > 0
+        ? ticket.zammad_updated_at
+        : ticket.zammad_created_at;
   return value ? new Date(value).toLocaleString() : "—";
 }

@@ -12,10 +12,11 @@ from app.db_models import (
     NotificationRow,
     SettingRow,
     TicketArticleRow,
+    TicketHistoryRow,
     TicketRow,
     UserRow,
 )
-from app.models import AlertRuleOut, ChannelConfigOut, GroupOut, NotificationOut, TicketArticleOut, TicketOut, UserOut
+from app.models import AlertRuleOut, ChannelConfigOut, GroupOut, NotificationOut, TicketArticleOut, TicketHistoryOut, TicketOut, UserOut
 
 
 async def list_users(db: AsyncSession) -> list[UserRow]:
@@ -34,6 +35,17 @@ async def get_articles_for_ticket(db: AsyncSession, ticket_id: str) -> list[Tick
     return (await db.scalars(
         select(TicketArticleRow).where(TicketArticleRow.ticket_id == ticket_id)
     )).all()
+
+
+async def get_state_history(db: AsyncSession) -> list[TicketHistoryRow]:
+    return (await db.scalars(
+        select(TicketHistoryRow).where(TicketHistoryRow.attribute == "state")
+    )).all()
+
+
+async def upsert_history(db: AsyncSession, history: list[TicketHistoryOut]) -> None:
+    for entry in history:
+        await _upsert(db, TicketHistoryRow, entry.model_dump())
 
 
 async def get_setting(db: AsyncSession, key: str) -> dict | None:

@@ -236,7 +236,9 @@ def _overview_buckets(period: str, year: int, month: int | None = None, week: st
                 "created": 0,
                 "closed": 0,
                 "open": 0,
+                "reopened": 0,
                 "backlog": 0,
+                "_open_ids": set(),
             }
             for month in range(1, 13)
         ]
@@ -251,7 +253,9 @@ def _overview_buckets(period: str, year: int, month: int | None = None, week: st
                 "created": 0,
                 "closed": 0,
                 "open": 0,
+                "reopened": 0,
                 "backlog": 0,
+                "_open_ids": set(),
             }
             for day in range(1, monthrange(year, month)[1] + 1)
         ]
@@ -274,7 +278,9 @@ def _overview_buckets(period: str, year: int, month: int | None = None, week: st
                 "created": 0,
                 "closed": 0,
                 "open": 0,
+                "reopened": 0,
                 "backlog": 0,
+                "_open_ids": set(),
             }
             for i in range(7)
         ]
@@ -292,7 +298,9 @@ def _overview_buckets(period: str, year: int, month: int | None = None, week: st
             "created": 0,
             "closed": 0,
             "open": 0,
+            "reopened": 0,
             "backlog": 0,
+            "_open_ids": set(),
         }
         for hour in range(24)
     ]
@@ -308,17 +316,53 @@ def _bucket_index(buckets: list[dict], value: datetime | None) -> int | None:
     return None
 
 
-def _first_open_at(ticket: TicketOut, open_events: dict[str, datetime]) -> datetime | None:
-    """When the ticket first entered Open. Prefers synced state history; falls back
-    to creation time for tickets with no history yet (or that were created open)."""
-    event_at = open_events.get(ticket.id)
-    if event_at is not None:
-        return event_at
-    # No history row: a ticket not in "new" (or one that reopened) has passed
-    # through open; approximate with its creation time until history is synced.
-    if ticket.state != "new" or ticket.reopen_count > 0:
-        return _as_utc(ticket.zammad_created_at)
-    return None
+def _open_intervals(ticket: TicketOut, history: list, now: datetime) -> list[tuple[datetime, datetime]]:
+    """Reconstruct the ticket's Open intervals (state == "open") from its synced
+    state-history rows. value_to == "open" starts an interval; the next state
+    change ends it; a trailing unclosed interval ends at now. Zammad may omit the
+    creation transition for tickets created directly in open — the leading
+    interval is synthesized from the first history row's value_from."""
+    rows = sorted(
+        (h for h in history if _as_utc(h.created_at) is not None),
+        key=lambda h: _as_utc(h.created_at),
+    )
+    if not rows:
+        # Fallback approximation until history sync catches up.
+        created = _as_utc(ticket.zammad_created_at)
+        if created is None or ticket.state == "new":
+            return []
+        end = now if ticket.state == "open" else (_as_utc(ticket.close_at or ticket.closed_at) or _as_utc(ticket.zammad_updated_at) or now)
+        return [(created, max(end, created))]
+
+    intervals: list[tuple[datetime, datetime]] = []
+    current: datetime | None = None
+    for row in rows:
+        ts = _as_utc(row.created_at)
+        if row.value_from == "open" and current is None:
+            # Missing creation transition: ticket was open before this change.
+            current = _as_utc(ticket.zammad_created_at) or ts
+        if row.value_to == "open":
+            current = current or ts
+        elif row.value_from == "open" and current is not None:
+            intervals.append((current, max(ts, current)))
+            current = None
+    if current is not None:
+        intervals.append((current, now))
+    return intervals
+
+
+def _reopen_events(history: list) -> list[datetime]:
+    """Reopen events: state transitions from closed to any non-closed state
+    (Zammad's ticket_reopen definition)."""
+    return [
+        ts
+        for h in history
+        if h.value_from == "closed" and h.value_to not in (None, "closed") and (ts := _as_utc(h.created_at)) is not None
+    ]
+
+
+def _overlaps(start: datetime, end: datetime, bucket: dict) -> bool:
+    return start < bucket["end"] and end > bucket["start"]
 
 
 def _apply_ticket_filters(tickets: list[TicketOut], group_id: str | None = None, owner_id: str | None = None) -> list[TicketOut]:
@@ -579,65 +623,94 @@ async def overview(
     per_page: int = Query(20, ge=1, le=100),
     group_id: str | None = None,
     owner_id: str | None = None,
+    tab: Literal["created", "closed", "open", "reopened"] | None = None,
 ):
-    year = year or datetime.now(timezone.utc).year
+    now = datetime.now(timezone.utc)
+    year = year or now.year
     buckets = _overview_buckets(period, year, month, week, day)
     window_start, window_end = buckets[0]["start"], buckets[-1]["end"]
     tickets = _apply_ticket_filters(await _fetch_scoped(current, db), group_id, owner_id)
 
-    # Earliest synced "became open" timestamp per ticket (value_to == "open").
-    open_events: dict[str, datetime] = {}
+    history_by_ticket: dict[str, list] = {}
     for h in await get_state_history(db):
-        if h.value_to != "open":
-            continue
-        ts = _as_utc(h.created_at)
-        if ts is not None and (h.ticket_id not in open_events or ts < open_events[h.ticket_id]):
-            open_events[h.ticket_id] = ts
+        history_by_ticket.setdefault(h.ticket_id, []).append(h)
 
-    rows = []
+    rows: list[tuple[TicketOut, datetime | None, datetime | None]] = []
+    open_ticket_ids: set[str] = set()
     for ticket in tickets:
+        intervals = _open_intervals(ticket, history_by_ticket.get(ticket.id, []), now)
+        reopens = _reopen_events(history_by_ticket.get(ticket.id, []))
+
         created_idx = _bucket_index(buckets, ticket.zammad_created_at)
         closed_idx = _bucket_index(buckets, ticket.closed_at)
-        open_at = _first_open_at(ticket, open_events)
-        open_idx = _bucket_index(buckets, open_at)
-
         if created_idx is not None:
             buckets[created_idx]["created"] += 1
         if closed_idx is not None:
             buckets[closed_idx]["closed"] += 1
-        if open_idx is not None:
-            buckets[open_idx]["open"] += 1
+        for start, end in intervals:
+            for bucket in buckets:
+                # Count each ticket once per bucket even if several of its open
+                # intervals overlap the same bucket (tickets, not intervals).
+                if _overlaps(start, end, bucket) and ticket.id not in bucket["_open_ids"]:
+                    bucket["_open_ids"].add(ticket.id)
+                    bucket["open"] += 1
+        for ts in reopens:
+            idx = _bucket_index(buckets, ts)
+            if idx is not None:
+                buckets[idx]["reopened"] += 1
+        if any(_overlaps(start, end, {"start": window_start, "end": window_end}) for start, end in intervals):
+            open_ticket_ids.add(ticket.id)
 
-        timestamps = [
-            _as_utc(ticket.zammad_created_at),
-            _as_utc(ticket.closed_at),
-            open_at,
-        ]
+        timestamps = [_as_utc(ticket.zammad_created_at), _as_utc(ticket.closed_at)]
+        timestamps.extend(ts for pair in intervals for ts in pair)
+        timestamps.extend(reopens)
         if any(ts and window_start <= ts < window_end for ts in timestamps):
-            rows.append(ticket)
+            last_open_at = max((start for start, _ in intervals), default=None)
+            last_reopen_at = max(reopens, default=None)
+            rows.append((ticket, last_open_at, last_reopen_at))
+
+    # Server-side tab filtering before pagination.
+    if tab == "open":
+        rows = [row for row in rows if row[0].state == "open"]
+    elif tab == "closed":
+        rows = [row for row in rows if row[0].state in ("closed", "merged")]
+    elif tab == "reopened":
+        rows = [row for row in rows if row[0].reopen_count > 0]
 
     backlog = 0
     for bucket in buckets:
         backlog += bucket["created"] - bucket["closed"]
         bucket["backlog"] = backlog
 
-    rows.sort(key=lambda t: t.zammad_updated_at, reverse=True)
+    rows.sort(key=lambda row: row[0].zammad_updated_at, reverse=True)
     total = len(rows)
     page_rows = rows[(page - 1) * per_page : page * per_page]
-    chart = [{k: bucket[k] for k in ("label", "created", "closed", "open", "backlog")} for bucket in buckets]
+    chart = [{k: bucket[k] for k in ("label", "created", "closed", "open", "reopened", "backlog")} for bucket in buckets]
+
+    ticket_dicts = []
+    for ticket, last_open_at, last_reopen_at in page_rows:
+        data = ticket.model_dump(mode="json")
+        # Overview-only injected timestamps; the shared ticket schema is untouched.
+        if tab == "open":
+            data["last_open_at"] = (last_open_at or _as_utc(ticket.zammad_updated_at) or _as_utc(ticket.zammad_created_at)).isoformat()
+        elif tab == "reopened":
+            fallback = last_reopen_at or _as_utc(ticket.zammad_updated_at)
+            data["last_reopen_at"] = fallback.isoformat() if fallback else None
+        ticket_dicts.append(data)
 
     return ApiResponse(data={
         "chart": chart,
         "totals": {
             "created": sum(point["created"] for point in chart),
             "closed": sum(point["closed"] for point in chart),
-            "open": sum(point["open"] for point in chart),
+            "open": len(open_ticket_ids),
+            "reopened": sum(point["reopened"] for point in chart),
             "backlog": backlog,
         },
-        "tickets": [t.model_dump(mode="json") for t in page_rows],
+        "tickets": ticket_dicts,
         "total": total,
-        "groups": sorted({t.group_name for t in rows if t.group_name}),
-        "agents": sorted({t.owner_name for t in rows if t.owner_name}),
+        "groups": sorted({row[0].group_name for row in rows if row[0].group_name}),
+        "agents": sorted({row[0].owner_name for row in rows if row[0].owner_name}),
     })
 
 

@@ -12,6 +12,7 @@ import type {
   NotificationEvent,
   OverviewData,
   OverviewPeriod,
+  OverviewTab,
   ReportExport,
   SettingsBundle,
   SettingsStatus,
@@ -161,7 +162,7 @@ export const apiClient = {
 
   async getOverview(
     _scope: Scope,
-    params: { period: OverviewPeriod; year: number; month?: number; week?: string; day?: string; group_id?: string | "all"; owner_id?: string | "all"; page?: number; page_size?: number }
+    params: { period: OverviewPeriod; year: number; month?: number; week?: string; day?: string; group_id?: string | "all"; owner_id?: string | "all"; tab?: OverviewTab; page?: number; page_size?: number }
   ): Promise<OverviewData> {
     return request<OverviewData>(`/tickets/overview${qs({
       period: params.period,
@@ -171,6 +172,7 @@ export const apiClient = {
       day: params.day,
       group_id: params.group_id,
       owner_id: params.owner_id,
+      tab: params.tab,
       page: params.page,
       per_page: params.page_size,
     })}`);

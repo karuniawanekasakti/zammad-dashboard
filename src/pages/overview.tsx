@@ -25,7 +25,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PriorityBadge, StateBadge } from "@/components/status-badges";
 import { formatNumber } from "@/lib/utils";
-import type { OverviewPeriod, Ticket } from "@/types";
+import type { OverviewPeriod, OverviewTab, Ticket } from "@/types";
 
 const PAGE_SIZE = 20;
 const EXPORT_SIZE = 100;
@@ -34,12 +34,14 @@ const COLORS = {
   closed: "hsl(142 76% 45%)",
   backlog: "hsl(200 80% 55%)",
   open: "hsl(32 95% 50%)",
+  reopened: "hsl(280 70% 55%)",
 };
 const METRICS = [
   { key: "created", label: "Created" },
   { key: "closed", label: "Closed" },
   { key: "backlog", label: "Backlog" },
   { key: "open", label: "Open" },
+  { key: "reopened", label: "Reopened" },
 ] as const;
 const PERIODS: { value: OverviewPeriod; label: string }[] = [
   { value: "year", label: "Year" },
@@ -59,12 +61,13 @@ export default function OverviewPage() {
   const [week, setWeek] = useState(weekInputValue(new Date()));
   const [day, setDay] = useState(new Date().toISOString().slice(0, 10));
   const [page, setPage] = useState(1);
-  const [tableMetric, setTableMetric] = useState<Exclude<Metric, "backlog">>("created");
+  const [tableMetric, setTableMetric] = useState<OverviewTab>("created");
   const [visible, setVisible] = useState<Record<Metric, boolean>>({
     created: true,
     closed: true,
     backlog: false,
     open: false,
+    reopened: false,
   });
   const [groupFilter, setGroupFilter] = useState("all");
   const [agentFilter, setAgentFilter] = useState("all");
@@ -75,8 +78,8 @@ export default function OverviewPage() {
   const months = Array.from({ length: 12 }, (_, i) => ({ value: i + 1, label: new Date(2000, i, 1).toLocaleString("en", { month: "long" }) }));
   const rangeKey = period === "year" ? String(year) : period === "month" ? `${year}-${month}` : period === "week" ? week : day;
   const overview = useQuery({
-    queryKey: ["overview", scopeKey, period, year, rangeKey, groupFilter, agentFilter, page],
-    queryFn: () => api.getOverview(scope, { period, year, month, week, day, group_id: groupFilter, owner_id: agentFilter, page, page_size: PAGE_SIZE }),
+    queryKey: ["overview", scopeKey, period, year, rangeKey, groupFilter, agentFilter, tableMetric, page],
+    queryFn: () => api.getOverview(scope, { period, year, month, week, day, group_id: groupFilter, owner_id: agentFilter, tab: tableMetric, page, page_size: PAGE_SIZE }),
   });
   const data = overview.data;
   const rows = data?.tickets ?? [];
@@ -90,7 +93,7 @@ export default function OverviewPage() {
   };
 
   const downloadCsv = async () => {
-    const exportData = await api.getOverview(scope, { period, year, month, week, day, group_id: groupFilter, owner_id: agentFilter, page: 1, page_size: EXPORT_SIZE });
+    const exportData = await api.getOverview(scope, { period, year, month, week, day, group_id: groupFilter, owner_id: agentFilter, tab: tableMetric, page: 1, page_size: EXPORT_SIZE });
     const header = ["Number", "Title", "State", "Priority", "Group", "Agent", "Created", "Closed", "Open"];
     const lines = [header, ...exportData.tickets.map(csvRow)].map((row) => row.map(csvCell).join(","));
     const url = URL.createObjectURL(new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" }));
@@ -198,11 +201,12 @@ export default function OverviewPage() {
         </ChartCard>
       </div>
 
-      <Tabs value={tableMetric} onValueChange={(v) => setTableMetric(v as typeof tableMetric)}>
+      <Tabs value={tableMetric} onValueChange={(v) => { setTableMetric(v as OverviewTab); setPage(1); }}>
         <TabsList>
           <TabsTrigger value="created">Created</TabsTrigger>
           <TabsTrigger value="closed">Closed</TabsTrigger>
           <TabsTrigger value="open">Open</TabsTrigger>
+          <TabsTrigger value="reopened">Reopened</TabsTrigger>
         </TabsList>
       </Tabs>
 
@@ -211,7 +215,7 @@ export default function OverviewPage() {
           <div>
             <CardTitle className="text-base">Records</CardTitle>
             <CardDescription>
-              {formatNumber(data?.totals[tableMetric] ?? 0)} {tableMetric} ticket(s) in this view
+              {formatNumber(tableMetric === "created" ? (data?.totals.created ?? 0) : total)} {tableMetric} ticket(s) in this view
             </CardDescription>
           </div>
           <Button variant="outline" size="sm" onClick={downloadCsv} disabled={!total}>
@@ -338,7 +342,7 @@ function csvRow(ticket: Ticket) {
     ticket.owner_name ?? "Unassigned",
     ticket.zammad_created_at,
     ticket.closed_at ?? "",
-    String(ticket.reopen_count),
+    ticket.last_open_at ?? "",
   ];
 }
 
@@ -346,14 +350,14 @@ function csvCell(value: string) {
   return `"${value.replace(/"/g, '""')}"`;
 }
 
-function dateFor(ticket: Ticket, metric: Exclude<Metric, "backlog">) {
-  // Open shows when the ticket actually entered open: last update for reopened
-  // tickets (closest available proxy), creation time otherwise. Mirrors backend.
+function dateFor(ticket: Ticket, metric: OverviewTab) {
   const value =
     metric === "closed"
       ? ticket.closed_at
-      : metric === "open" && ticket.reopen_count > 0
-        ? ticket.zammad_updated_at
-        : ticket.zammad_created_at;
+      : metric === "open"
+        ? (ticket.last_open_at ?? ticket.zammad_updated_at ?? ticket.zammad_created_at)
+        : metric === "reopened"
+          ? (ticket.last_reopen_at ?? ticket.zammad_updated_at)
+          : ticket.zammad_created_at;
   return value ? new Date(value).toLocaleString() : "—";
 }

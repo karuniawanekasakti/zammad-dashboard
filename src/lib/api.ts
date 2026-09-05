@@ -31,6 +31,7 @@ import type {
   NotificationEvent,
   OverviewData,
   OverviewPeriod,
+  OverviewTab,
   ReportExport,
   Role,
   SettingsBundle,
@@ -259,12 +260,12 @@ function buildMockSlaMonitor(rows: Ticket[]): SlaMonitorData {
 function overviewBuckets(period: OverviewPeriod, year: number, month?: number, week?: string, day?: string) {
   const now = new Date();
   if (period === "year") {
-    return Array.from({ length: 12 }, (_, i) => ({ label: new Date(year, i, 1).toLocaleString("en", { month: "short" }), start: new Date(year, i, 1), end: new Date(year, i + 1, 1), created: 0, closed: 0, open: 0, backlog: 0 }));
+    return Array.from({ length: 12 }, (_, i) => ({ label: new Date(year, i, 1).toLocaleString("en", { month: "short" }), start: new Date(year, i, 1), end: new Date(year, i + 1, 1), created: 0, closed: 0, open: 0, reopened: 0, backlog: 0 }));
   }
   const selectedMonth = month ? month - 1 : year === now.getFullYear() ? now.getMonth() : 0;
   if (period === "month") {
     const days = new Date(year, selectedMonth + 1, 0).getDate();
-    return Array.from({ length: days }, (_, i) => ({ label: String(i + 1), start: new Date(year, selectedMonth, i + 1), end: new Date(year, selectedMonth, i + 2), created: 0, closed: 0, open: 0, backlog: 0 }));
+    return Array.from({ length: days }, (_, i) => ({ label: String(i + 1), start: new Date(year, selectedMonth, i + 1), end: new Date(year, selectedMonth, i + 2), created: 0, closed: 0, open: 0, reopened: 0, backlog: 0 }));
   }
   if (period === "week") {
     const base = week ? dateFromWeekInput(week) : year === now.getFullYear() ? now : new Date(year, 0, 1);
@@ -276,12 +277,12 @@ function overviewBuckets(period: OverviewPeriod, year: number, month?: number, w
       day.setDate(start.getDate() + i);
       const end = new Date(day);
       end.setDate(day.getDate() + 1);
-      return { label: day.toLocaleString("en", { weekday: "short" }), start: day, end, created: 0, closed: 0, open: 0, backlog: 0 };
+      return { label: day.toLocaleString("en", { weekday: "short" }), start: day, end, created: 0, closed: 0, open: 0, reopened: 0, backlog: 0 };
     });
   }
   const selectedDay = day ? new Date(`${day}T00:00:00`) : year === now.getFullYear() ? now : new Date(year, 0, 1);
   selectedDay.setHours(0, 0, 0, 0);
-  return Array.from({ length: 24 }, (_, hour) => ({ label: `${String(hour).padStart(2, "0")}:00`, start: new Date(selectedDay.getTime() + hour * 3600000), end: new Date(selectedDay.getTime() + (hour + 1) * 3600000), created: 0, closed: 0, open: 0, backlog: 0 }));
+  return Array.from({ length: 24 }, (_, hour) => ({ label: `${String(hour).padStart(2, "0")}:00`, start: new Date(selectedDay.getTime() + hour * 3600000), end: new Date(selectedDay.getTime() + (hour + 1) * 3600000), created: 0, closed: 0, open: 0, reopened: 0, backlog: 0 }));
 }
 
 function dateFromWeekInput(value: string) {
@@ -415,52 +416,74 @@ const mockApi = {
 
   async getOverview(
     scope: Scope,
-    params: { period: OverviewPeriod; year: number; month?: number; week?: string; day?: string; group_id?: string | "all"; owner_id?: string | "all"; page?: number; page_size?: number }
+    params: { period: OverviewPeriod; year: number; month?: number; week?: string; day?: string; group_id?: string | "all"; owner_id?: string | "all"; tab?: OverviewTab; page?: number; page_size?: number }
   ): Promise<OverviewData> {
     const buckets = overviewBuckets(params.period, params.year, params.month, params.week, params.day);
+    const nowMs = Date.now();
     const start = buckets[0].start.getTime();
     const end = buckets[buckets.length - 1].end.getTime();
-    const rows: Ticket[] = [];
     let scopedTickets = applyScope(tickets, scope);
     if (params.group_id && params.group_id !== "all") scopedTickets = scopedTickets.filter((t) => t.group_id === params.group_id);
     if (params.owner_id && params.owner_id !== "all") scopedTickets = scopedTickets.filter((t) => t.owner_id === params.owner_id);
 
+    // Mock has no state history, so mirror the backend's fallback approximation:
+    // new -> never open; currently open -> creation to now; otherwise creation to close/last update.
+    const openIntervals = (t: Ticket): Array<{ start: number; end: number }> => {
+      if (t.state === "new") return [];
+      const created = new Date(t.zammad_created_at).getTime();
+      const finish = t.state === "open" ? nowMs : new Date(t.close_at ?? t.closed_at ?? t.zammad_updated_at).getTime();
+      return [{ start: created, end: Math.max(finish, created) }];
+    };
+
+    let rows: Ticket[] = [];
+    const openTicketIds = new Set<string>();
     for (const ticket of scopedTickets) {
       const created = bucketIndex(buckets, ticket.zammad_created_at);
       const closed = bucketIndex(buckets, ticket.closed_at);
-      // "open" = tickets that have ever been in the Open status. Mock data has no
-      // state history, so approximate entered-open with the last update for
-      // reopened tickets and creation time otherwise (mirrors backend fallback).
-      const everOpen = ticket.state !== "new" || ticket.reopen_count > 0;
-      const openAt = !everOpen ? null : ticket.reopen_count > 0 ? ticket.zammad_updated_at : ticket.zammad_created_at;
-      const open = bucketIndex(buckets, openAt);
       if (created >= 0) buckets[created].created += 1;
       if (closed >= 0) buckets[closed].closed += 1;
-      if (open >= 0) buckets[open].open += 1;
+      for (const iv of openIntervals(ticket)) {
+        for (const b of buckets) if (iv.start < b.end.getTime() && iv.end > b.start.getTime()) b.open += 1;
+        if (iv.start < end && iv.end > start) openTicketIds.add(ticket.id);
+      }
+      // Reopened approximated as reopen_count events at the ticket's last update.
+      if (ticket.reopen_count > 0) {
+        const idx = bucketIndex(buckets, ticket.zammad_updated_at);
+        if (idx >= 0) buckets[idx].reopened += ticket.reopen_count;
+      }
 
-      const times = [ticket.zammad_created_at, ticket.closed_at, openAt]
-        .filter(Boolean)
+      const times = [ticket.zammad_created_at, ticket.closed_at, ...openIntervals(ticket).flatMap((iv) => [new Date(iv.start).toISOString(), new Date(iv.end).toISOString()])]
         .map((v) => new Date(v!).getTime());
       if (times.some((t) => start <= t && t < end)) rows.push(ticket);
     }
 
+    if (params.tab === "open") rows = rows.filter((t) => t.state === "open");
+    else if (params.tab === "closed") rows = rows.filter((t) => t.state === "closed" || t.state === "merged");
+    else if (params.tab === "reopened") rows = rows.filter((t) => t.reopen_count > 0);
+
     let backlog = 0;
     const chart = buckets.map((bucket) => {
       backlog += bucket.created - bucket.closed;
-      return { label: bucket.label, created: bucket.created, closed: bucket.closed, open: bucket.open, backlog };
+      return { label: bucket.label, created: bucket.created, closed: bucket.closed, open: bucket.open, reopened: bucket.reopened, backlog };
     });
     rows.sort((a, b) => new Date(b.zammad_updated_at).getTime() - new Date(a.zammad_updated_at).getTime());
     const page = params.page ?? 1;
     const pageSize = params.page_size ?? 20;
+    const pageRows = rows.slice((page - 1) * pageSize, page * pageSize).map((t) => ({
+      ...t,
+      ...(params.tab === "open" ? { last_open_at: new Date(openIntervals(t)[0]?.start ?? new Date(t.zammad_updated_at).getTime()).toISOString() } : {}),
+      ...(params.tab === "reopened" ? { last_reopen_at: t.zammad_updated_at } : {}),
+    }));
     return delay({
       chart,
       totals: {
         created: chart.reduce((n, p) => n + p.created, 0),
         closed: chart.reduce((n, p) => n + p.closed, 0),
-        open: chart.reduce((n, p) => n + p.open, 0),
+        open: openTicketIds.size,
+        reopened: chart.reduce((n, p) => n + p.reopened, 0),
         backlog,
       },
-      tickets: rows.slice((page - 1) * pageSize, page * pageSize),
+      tickets: pageRows,
       total: rows.length,
       groups: [...new Set(rows.map((t) => t.group_name).filter(Boolean))].sort(),
       agents: [...new Set(rows.map((t) => t.owner_name).filter(Boolean) as string[])].sort(),

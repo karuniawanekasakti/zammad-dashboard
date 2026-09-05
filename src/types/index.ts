@@ -75,6 +75,8 @@ export interface Ticket {
   zammad_created_at: string;
   zammad_updated_at: string;
   closed_at: string | null;
+  last_open_at?: string | null;
+  last_reopen_at?: string | null;
 }
 
 export interface SlaMonitorTicket extends Ticket {
@@ -196,18 +198,20 @@ export interface TrendPoint {
 }
 
 export type OverviewPeriod = "year" | "month" | "week" | "day";
+export type OverviewTab = "created" | "closed" | "open" | "reopened";
 
 export interface OverviewPoint {
   label: string;
   created: number;
   closed: number;
   open: number;
+  reopened: number;
   backlog: number;
 }
 
 export interface OverviewData {
   chart: OverviewPoint[];
-  totals: { created: number; closed: number; open: number; backlog: number };
+  totals: { created: number; closed: number; open: number; reopened: number; backlog: number };
   tickets: Ticket[];
   total: number;
   groups: string[];

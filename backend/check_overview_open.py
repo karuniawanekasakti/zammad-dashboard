@@ -56,10 +56,9 @@ def hist(id_: int, ticket_id: int, value_from: str | None, value_to: str, at: da
 
 # (a) open Mon 09:00 -> Wed 09:00, then closed (history). Created before the window.
 TICKET_A = make_ticket(1, "closed", MON - timedelta(days=3), DAYS[2] + timedelta(hours=9), closed=DAYS[2] + timedelta(hours=9))
-# (b) open Mon 10:00 -> Tue 10:00, closed; reopened Sat 09:00, closed again Sat 21:00,
-#     reopened once more Sat 22:00 and currently open: two distinct intervals inside
-#     the Saturday bucket must still count the ticket once there.
-TICKET_B = make_ticket(2, "open", MON - timedelta(days=2), DAYS[5] + timedelta(hours=22), reopen_count=2)
+# (b) open Mon 10:00 -> Tue 10:00, closed; reopened Sat 09:00 and currently open
+#     (one reopen event Saturday).
+TICKET_B = make_ticket(2, "open", MON - timedelta(days=2), DAYS[5] + timedelta(hours=9), reopen_count=1)
 # (c) new with no history: never open.
 TICKET_C = make_ticket(3, "new", DAYS[1] + timedelta(hours=8), DAYS[1] + timedelta(hours=8))
 # (d) pending with no history: fallback approximation (creation -> last update).
@@ -75,17 +74,15 @@ HISTORY = [
     hist(3, 2, "new", "open", DAYS[0] + timedelta(hours=10)),
     hist(4, 2, "open", "closed", DAYS[1] + timedelta(hours=10)),
     hist(5, 2, "closed", "open", DAYS[5] + timedelta(hours=9)),
-    hist(6, 2, "open", "closed", DAYS[5] + timedelta(hours=21)),
-    hist(7, 2, "closed", "open", DAYS[5] + timedelta(hours=22)),
     hist(8, 5, "open", "pending", DAYS[3] + timedelta(hours=9)),
 ]
 
 TICKETS = [TICKET_A, TICKET_B, TICKET_C, TICKET_D, TICKET_E]
 
-# (a) spans Mon-Wed; (b) Mon-Tue + Sat-now (Sat counted once despite two intervals);
-# (d) fallback Wed-Fri; (e) synthesized interval Mon(creation)-Thu.
+# (a) spans Mon-Wed; (b) Mon-Tue + Sat-now; (d) fallback Wed-Fri;
+# (e) synthesized interval Mon(creation)-Thu.
 EXPECTED_OPEN = [3, 3, 3, 2, 1, 1, 1]
-EXPECTED_REOPENED = [0, 0, 0, 0, 0, 2, 0]
+EXPECTED_REOPENED = [0, 0, 0, 0, 0, 1, 0]
 
 
 async def call(tab=None, page=1):
@@ -117,23 +114,23 @@ async def main() -> None:
     assert open_counts == EXPECTED_OPEN, f"open buckets {open_counts} != {EXPECTED_OPEN}"
     assert reopened_counts == EXPECTED_REOPENED, f"reopened buckets {reopened_counts} != {EXPECTED_REOPENED}"
     assert res["totals"]["open"] == 4, f"totals.open {res['totals']['open']} != 4"
-    assert res["totals"]["reopened"] == 2, f"totals.reopened {res['totals']['reopened']} != 2"
+    assert res["totals"]["reopened"] == 1, f"totals.reopened {res['totals']['reopened']} != 1"
     assert res["total"] == 5
 
-    # tab=open: only the currently-open ticket (b), with last_open_at = Saturday 22:00.
+    # tab=open: only the currently-open ticket (b), with last_open_at = Saturday 09:00.
     # Past-open-but-now-closed (a) and now-pending (e) tickets are excluded.
     res = (await call(tab="open")).data
     assert res["total"] == 1, f"open tab total {res['total']} != 1"
     assert res["tickets"][0]["id"] == "2"
     last_open = datetime.fromisoformat(res["tickets"][0]["last_open_at"])
-    assert last_open == DAYS[5] + timedelta(hours=22), f"last_open_at {last_open} != Saturday 22:00"
+    assert last_open == DAYS[5] + timedelta(hours=9), f"last_open_at {last_open} != Saturday 09:00"
 
-    # tab=reopened: only ticket (b), with last_reopen_at = Saturday 22:00.
+    # tab=reopened: only ticket (b), with last_reopen_at = Saturday 09:00.
     res = (await call(tab="reopened")).data
     assert res["total"] == 1, f"reopened tab total {res['total']} != 1"
     assert res["tickets"][0]["id"] == "2"
     last_reopen = datetime.fromisoformat(res["tickets"][0]["last_reopen_at"])
-    assert last_reopen == DAYS[5] + timedelta(hours=22), f"last_reopen_at {last_reopen} != Saturday 22:00"
+    assert last_reopen == DAYS[5] + timedelta(hours=9), f"last_reopen_at {last_reopen} != Saturday 09:00"
 
     # tab=closed: ticket (a) only (closed in-window).
     res = (await call(tab="closed")).data

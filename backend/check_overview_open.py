@@ -64,6 +64,10 @@ TICKET_B = make_ticket(2, "open", MON - timedelta(days=2), DAYS[5] + timedelta(h
 TICKET_C = make_ticket(3, "new", DAYS[1] + timedelta(hours=8), DAYS[1] + timedelta(hours=8))
 # (d) pending with no history: fallback approximation (creation -> last update).
 TICKET_D = make_ticket(4, "pending", DAYS[2] + timedelta(hours=8), DAYS[4] + timedelta(hours=8))
+# (e) created directly in open (Zammad omits the creation transition): the first
+#     history row is open -> pending, so the leading open interval is synthesized
+#     from the row's value_from, starting at ticket creation.
+TICKET_E = make_ticket(5, "pending", DAYS[0] + timedelta(hours=7), DAYS[3] + timedelta(hours=9))
 
 HISTORY = [
     hist(1, 1, "new", "open", DAYS[0] + timedelta(hours=9)),
@@ -73,13 +77,14 @@ HISTORY = [
     hist(5, 2, "closed", "open", DAYS[5] + timedelta(hours=9)),
     hist(6, 2, "open", "closed", DAYS[5] + timedelta(hours=21)),
     hist(7, 2, "closed", "open", DAYS[5] + timedelta(hours=22)),
+    hist(8, 5, "open", "pending", DAYS[3] + timedelta(hours=9)),
 ]
 
-TICKETS = [TICKET_A, TICKET_B, TICKET_C, TICKET_D]
+TICKETS = [TICKET_A, TICKET_B, TICKET_C, TICKET_D, TICKET_E]
 
 # (a) spans Mon-Wed; (b) Mon-Tue + Sat-now (Sat counted once despite two intervals);
-# (d) fallback Wed-Fri.
-EXPECTED_OPEN = [2, 2, 2, 1, 1, 1, 1]
+# (d) fallback Wed-Fri; (e) synthesized interval Mon(creation)-Thu.
+EXPECTED_OPEN = [3, 3, 3, 2, 1, 1, 1]
 EXPECTED_REOPENED = [0, 0, 0, 0, 0, 2, 0]
 
 
@@ -111,9 +116,9 @@ async def main() -> None:
     reopened_counts = [point["reopened"] for point in res["chart"]]
     assert open_counts == EXPECTED_OPEN, f"open buckets {open_counts} != {EXPECTED_OPEN}"
     assert reopened_counts == EXPECTED_REOPENED, f"reopened buckets {reopened_counts} != {EXPECTED_REOPENED}"
-    assert res["totals"]["open"] == 3, f"totals.open {res['totals']['open']} != 3"
+    assert res["totals"]["open"] == 4, f"totals.open {res['totals']['open']} != 4"
     assert res["totals"]["reopened"] == 2, f"totals.reopened {res['totals']['reopened']} != 2"
-    assert res["total"] == 4
+    assert res["total"] == 5
 
     # tab=open: only the currently-open ticket (b), with last_open_at = Saturday 22:00.
     res = (await call(tab="open")).data

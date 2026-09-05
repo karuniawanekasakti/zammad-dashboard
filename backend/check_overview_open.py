@@ -121,6 +121,7 @@ async def main() -> None:
     assert res["total"] == 5
 
     # tab=open: only the currently-open ticket (b), with last_open_at = Saturday 22:00.
+    # Past-open-but-now-closed (a) and now-pending (e) tickets are excluded.
     res = (await call(tab="open")).data
     assert res["total"] == 1, f"open tab total {res['total']} != 1"
     assert res["tickets"][0]["id"] == "2"

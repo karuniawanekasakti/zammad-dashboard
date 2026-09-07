@@ -12,7 +12,7 @@ import {
   Radio,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { appVersion } from "@/lib/version";
+import { appVersion, logoUrl } from "@/lib/version";
 import type { Role } from "@/types";
 
 interface NavItem {
@@ -46,7 +46,7 @@ export function Sidebar({ role, collapsed }: { role: Role; collapsed: boolean })
       )}
     >
       <div className="flex items-center gap-3 px-4 py-3.5 border-b border-sidebar-border">
-        <img src="/mti-logo.png" alt="MTI" className="h-9 w-9 shrink-0 rounded-lg object-contain bg-white shadow-sm ring-1 ring-black/10" />
+        <img src={logoUrl} alt="MTI" className="h-9 w-9 shrink-0 rounded-lg object-contain bg-white shadow-sm ring-1 ring-black/10" />
         {!collapsed && (
           <div className="flex flex-col leading-tight">
             <span className="text-[15px] font-bold tracking-tight">MTI</span>

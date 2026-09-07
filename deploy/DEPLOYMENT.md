@@ -76,15 +76,7 @@ chmod +x deploy/deploy.sh
 ./deploy/deploy.sh
 ```
 
-The script:
-
-1. Validates required commands and `.env` values.
-2. Warns about branch mismatch or uncommitted changes.
-3. Optionally runs `git pull --ff-only` when `DEPLOY_PULL=true`.
-4. Builds images.
-5. Applies database migrations as a one-shot container (`docker compose run --rm --no-deps api alembic upgrade head`) — a failing migration aborts the deploy before any container is switched.
-6. Starts/switches containers and waits for `GET /api/v1/system/health` through the local web container.
-7. Prints service status and the local upstream URL.
+The script runs preflight checks, optionally pulls, builds images, applies migrations as a one-shot container *before* switching services, then health-checks — the full step-by-step is in [docs/CI-CD.md](../docs/CI-CD.md#what-a-deploy-does).
 
 The migration also still runs in `backend/Dockerfile` before Uvicorn starts (running it twice is a no-op):
 

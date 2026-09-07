@@ -347,9 +347,10 @@ const mockApi = {
     );
   },
 
-  async listSlaMonitor(scope: Scope, groupId?: string): Promise<SlaMonitorData> {
+  async listSlaMonitor(scope: Scope, groupId?: string, priority?: TicketPriority | "all"): Promise<SlaMonitorData> {
     let rows = applyScope(tickets, scope);
     if (groupId && groupId !== "all") rows = rows.filter((t) => t.group_id === groupId);
+    if (priority && priority !== "all") rows = rows.filter((t) => t.priority === priority);
     return delay(buildMockSlaMonitor(rows));
   },
 

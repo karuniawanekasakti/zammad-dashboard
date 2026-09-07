@@ -567,8 +567,15 @@ async def sla_at_risk(current: Annotated[dict, Depends(get_current_user)], db: A
 
 
 @router.get("/sla-monitor", response_model=ApiResponse)
-async def sla_monitor(current: Annotated[dict, Depends(get_current_user)], db: Annotated[AsyncSession, Depends(get_db)], group_id: str | None = None):
+async def sla_monitor(
+    current: Annotated[dict, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    group_id: str | None = None,
+    priority: str | None = None,
+):
     tickets = _apply_ticket_filters(await _fetch_scoped(current, db), group_id)
+    if priority and priority != "all":
+        tickets = [ticket for ticket in tickets if ticket.priority == priority]
     visible_ids = {t.group_id for t in tickets}
     groups = sorted((g.id, g.name or "Unknown") for g in await list_group_rows(db) if g.id in visible_ids)
     if "" in visible_ids:

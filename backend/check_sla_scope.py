@@ -68,20 +68,25 @@ async def main() -> None:
     }
     for role, current in roles.items():
         for group_id in (None, "all"):
-            response = await tickets.sla_monitor(current=current, db=object(), group_id=group_id)
+            response = await tickets.sla_monitor(current=current, db=object(), group_id=group_id, priority=None)
             assert {row["id"] for row in response.data["tickets"]} == expected_all[role]
 
     for role in ("team_lead", "project_manager"):
-        allowed = await tickets.sla_monitor(current=roles[role], db=object(), group_id="g1")
-        denied = await tickets.sla_monitor(current=roles[role], db=object(), group_id="g2")
+        allowed = await tickets.sla_monitor(current=roles[role], db=object(), group_id="g1", priority=None)
+        denied = await tickets.sla_monitor(current=roles[role], db=object(), group_id="g2", priority=None)
         assert {row["id"] for row in allowed.data["tickets"]} == {"1", "2"}
         assert denied.data["tickets"] == []
 
-    agent_allowed = await tickets.sla_monitor(current=roles["agent"], db=object(), group_id="g1")
-    agent_denied = await tickets.sla_monitor(current=roles["agent"], db=object(), group_id="g2")
+    agent_allowed = await tickets.sla_monitor(current=roles["agent"], db=object(), group_id="g1", priority=None)
+    agent_denied = await tickets.sla_monitor(current=roles["agent"], db=object(), group_id="g2", priority=None)
     assert {row["id"] for row in agent_allowed.data["tickets"]} == {"1"}
     assert agent_denied.data["tickets"] == []
     assert [(row["id"], row["name"]) for row in agent_allowed.data["sla_rows"]] == [("g1", "Group g1")]
+
+    composed = await tickets.sla_monitor(current=roles["admin"], db=object(), group_id="g1", priority="normal")
+    assert {row["id"] for row in composed.data["tickets"]} == {"1", "2"}
+    empty_priority = await tickets.sla_monitor(current=roles["admin"], db=object(), group_id="g1", priority="high")
+    assert empty_priority.data["tickets"] == []
 
     print("check_sla_scope: OK")
 

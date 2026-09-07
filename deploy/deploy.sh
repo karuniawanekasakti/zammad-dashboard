@@ -78,7 +78,7 @@ require_env() {
 }
 
 preflight() {
-  log "[1/5] Checking environment..."
+  log "[1/6] Checking environment..."
   require_cmd git
   require_cmd docker
   require_cmd curl
@@ -114,7 +114,7 @@ preflight() {
 }
 
 pull_if_requested() {
-  log "[2/5] Updating source code..."
+  log "[2/6] Updating source code..."
   if [[ "$DEPLOY_PULL" == "true" ]]; then
     git pull --ff-only
   else
@@ -122,9 +122,19 @@ pull_if_requested() {
   fi
 }
 
-build_and_start() {
-  log "[3/5] Building and starting containers..."
-  compose up -d --build --remove-orphans
+build_images() {
+  log "[3/6] Building images..."
+  compose build
+}
+
+migrate() {
+  log "[4/6] Applying database migrations..."
+  compose run --rm --no-deps api alembic upgrade head
+}
+
+start_containers() {
+  log "[5/6] Starting containers..."
+  compose up -d --remove-orphans
 }
 
 health() {
@@ -134,7 +144,7 @@ health() {
 }
 
 wait_for_health() {
-  log "[4/5] Running health check..."
+  log "Running health check..."
   local attempts=30
   for ((i = 1; i <= attempts; i++)); do
     if curl -fsS "${BASE_URL}/api/v1/system/health" >/tmp/zammad-dashboard-health.json 2>/dev/null; then
@@ -155,7 +165,7 @@ wait_for_health() {
 }
 
 summary() {
-  log "[5/5] Deployment summary"
+  log "[6/6] Deployment summary"
   compose ps
   cat <<SUMMARY
 
@@ -176,7 +186,9 @@ SUMMARY
 deploy() {
   preflight
   pull_if_requested
-  build_and_start
+  build_images
+  migrate
+  start_containers
   wait_for_health
   summary
 }

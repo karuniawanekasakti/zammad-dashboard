@@ -419,42 +419,36 @@ const mockApi = {
     params: { period: OverviewPeriod; year: number; month?: number; week?: string; day?: string; group_id?: string | "all"; owner_id?: string | "all"; tab?: OverviewTab; page?: number; page_size?: number }
   ): Promise<OverviewData> {
     const buckets = overviewBuckets(params.period, params.year, params.month, params.week, params.day);
-    const nowMs = Date.now();
     const start = buckets[0].start.getTime();
     const end = buckets[buckets.length - 1].end.getTime();
     let scopedTickets = applyScope(tickets, scope);
     if (params.group_id && params.group_id !== "all") scopedTickets = scopedTickets.filter((t) => t.group_id === params.group_id);
     if (params.owner_id && params.owner_id !== "all") scopedTickets = scopedTickets.filter((t) => t.owner_id === params.owner_id);
 
-    // Mock has no state history, so mirror the backend's fallback approximation:
-    // new -> never open; currently open -> creation to now; otherwise creation to close/last update.
-    const openIntervals = (t: Ticket): Array<{ start: number; end: number }> => {
-      if (t.state === "new") return [];
-      const created = new Date(t.zammad_created_at).getTime();
-      const finish = t.state === "open" ? nowMs : new Date(t.close_at ?? t.closed_at ?? t.zammad_updated_at).getTime();
-      return [{ start: created, end: Math.max(finish, created) }];
-    };
-
     let rows: Ticket[] = [];
     const openTicketIds = new Set<string>();
     for (const ticket of scopedTickets) {
       const created = bucketIndex(buckets, ticket.zammad_created_at);
       const closed = bucketIndex(buckets, ticket.closed_at);
-      if (created >= 0) buckets[created].created += 1;
-      if (closed >= 0) buckets[closed].closed += 1;
-      for (const iv of openIntervals(ticket)) {
-        for (const b of buckets) if (iv.start < b.end.getTime() && iv.end > b.start.getTime()) b.open += 1;
-        if (iv.start < end && iv.end > start) openTicketIds.add(ticket.id);
+      // Chart Open mirrors the backend: tickets *created* in the bucket (same
+      // bucketing as created/closed), NOT a cumulative overlap of open intervals.
+      if (created >= 0) {
+        buckets[created].created += 1;
+        buckets[created].open += 1;
+        openTicketIds.add(ticket.id);
       }
+      if (closed >= 0) buckets[closed].closed += 1;
       // Reopened approximated as reopen_count events at the ticket's last update.
+      let reopenInWindow = false;
       if (ticket.reopen_count > 0) {
         const idx = bucketIndex(buckets, ticket.zammad_updated_at);
-        if (idx >= 0) buckets[idx].reopened += ticket.reopen_count;
+        if (idx >= 0) {
+          buckets[idx].reopened += ticket.reopen_count;
+          reopenInWindow = true;
+        }
       }
 
-      const times = [ticket.zammad_created_at, ticket.closed_at, ...openIntervals(ticket).flatMap((iv) => [new Date(iv.start).toISOString(), new Date(iv.end).toISOString()])]
-        .map((v) => new Date(v!).getTime());
-      if (times.some((t) => start <= t && t < end)) rows.push(ticket);
+      if (created >= 0 || closed >= 0 || reopenInWindow) rows.push(ticket);
     }
 
     if (params.tab === "open") rows = rows.filter((t) => t.state === "open");
@@ -471,7 +465,7 @@ const mockApi = {
     const pageSize = params.page_size ?? 20;
     const pageRows = rows.slice((page - 1) * pageSize, page * pageSize).map((t) => ({
       ...t,
-      ...(params.tab === "open" ? { last_open_at: new Date(openIntervals(t)[0]?.start ?? new Date(t.zammad_updated_at).getTime()).toISOString() } : {}),
+      ...(params.tab === "open" ? { last_open_at: t.zammad_created_at } : {}),
       ...(params.tab === "reopened" ? { last_reopen_at: t.zammad_updated_at } : {}),
     }));
     return delay({

@@ -12,6 +12,7 @@ import {
   Radio,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { appVersion } from "@/lib/version";
 import type { Role } from "@/types";
 
 interface NavItem {
@@ -76,7 +77,7 @@ export function Sidebar({ role, collapsed }: { role: Role; collapsed: boolean })
         ))}
       </nav>
       <div className="p-3 border-t border-sidebar-border text-[11px] text-sidebar-foreground/60">
-        {!collapsed && <>v0.1.0</>}
+        {!collapsed && <>{appVersion}</>}
       </div>
     </aside>
   );

@@ -223,10 +223,10 @@ def _row_to_ticket(row: TicketRow) -> TicketOut:
     return TicketOut.model_validate(row, from_attributes=True)
 
 
-async def _fetch_scoped(current: dict, db: AsyncSession, *, agent_as_all_groups: bool = False) -> list[TicketOut]:
+async def _fetch_scoped(current: dict, db: AsyncSession) -> list[TicketOut]:
     """Read tickets visible to the current user from PostgreSQL."""
     tickets = [_row_to_ticket(row) for row in await list_ticket_rows(db)]
-    return tickets if agent_as_all_groups and current["role"] == "agent" else _scope_filter(tickets, current)
+    return _scope_filter(tickets, current)
 
 
 def _as_utc(value: datetime | None) -> datetime | None:
@@ -569,12 +569,9 @@ async def sla_at_risk(current: Annotated[dict, Depends(get_current_user)], db: A
 
 @router.get("/sla-monitor", response_model=ApiResponse)
 async def sla_monitor(current: Annotated[dict, Depends(get_current_user)], db: Annotated[AsyncSession, Depends(get_db)], group_id: str | None = None):
-    tickets = _apply_ticket_filters(await _fetch_scoped(current, db, agent_as_all_groups=not group_id or group_id == "all"), group_id)
-    if group_id and group_id != "all":
-        group_names = sorted({t.group_name for t in tickets if t.group_name})
-    else:
-        visible_ids = {t.group_id for t in tickets}
-        group_names = sorted(g.name for g in await list_group_rows(db) if current["role"] in ("admin", "agent") or g.id in visible_ids or g.id in current.get("group_ids", []))
+    tickets = _apply_ticket_filters(await _fetch_scoped(current, db), group_id)
+    visible_ids = {t.group_id for t in tickets}
+    group_names = sorted(g.name for g in await list_group_rows(db) if g.id in visible_ids)
     return ApiResponse(data=_build_sla_monitor(tickets, group_names=group_names))
 
 

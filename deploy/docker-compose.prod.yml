@@ -49,6 +49,7 @@ services:
         VITE_BASE_PATH: "${VITE_BASE_PATH:-/}"
         VITE_API_BASE: "${VITE_API_BASE:-/api/v1}"
         VITE_WS_BASE: "${VITE_WS_BASE:-}"
+        VITE_APP_VERSION: "${DEPLOY_APP_VERSION:-}"
     ports:
       - "${DEPLOY_BIND_HOST:-127.0.0.1}:${DEPLOY_HTTP_PORT:-8080}:80"
     depends_on:

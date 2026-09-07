@@ -156,26 +156,27 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 
 ## Git Management
 
-This project uses Git with a simple branching strategy suited for a solo developer.
+This project uses trunk-based development on `master` with tag-driven releases.
 
 ### Branching Strategy
 
 ```
-main          ← production-ready, always stable
-  └── develop ← daily integration, base for all new features
-        ├── feat/crm-project-crud
-        ├── feat/dashboard-charts
-        ├── fix/login-token-refresh
-        └── chore/update-dependencies
+master        ← the trunk; CI must stay green
+  ├── feat/crm-project-crud
+  ├── feat/dashboard-charts
+  ├── fix/login-token-refresh
+  └── chore/update-dependencies
+
+vX.Y.Z tags   ← annotated semver release tags on master; pushing one deploys
 ```
 
 **Branch rules:**
-- `main` — only accepts merges from `develop` via PR/MR after testing
-- `develop` — primary working branch; direct pushes allowed for small changes
-- `feat/*` — new features; branch from `develop`, merge back to `develop`
-- `fix/*` — bug fixes; branch from `develop` (or `main` for production hotfixes)
+- `master` — the only long-lived branch; PRs target it and CI runs on every PR and push
+- `feat/*` — new features; branch from `master`, merge back to `master`
+- `fix/*` — bug fixes; branch from `master`
 - `chore/*` — maintenance, dependency updates, refactors without functional changes
 - `docs/*` — documentation-only changes
+- Releases are annotated `vX.Y.Z` tags on `master`, cut with `./deploy/release.sh X.Y.Z`; pushing the tag deploys to production. See `docs/CI-CD.md`.
 
 ### Branch Naming Convention
 

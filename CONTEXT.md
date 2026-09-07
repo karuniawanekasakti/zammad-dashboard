@@ -11,21 +11,17 @@ of state transitions synced from Zammad into the `ticket_history` table.
 
 ## Open (metric)
 
-**Open** always refers to the *state*, never to a ticket's lifetime of having
-once been open. There is no "ever-open" concept anywhere in the product.
+**Open** has two distinct, intentionally different meanings on the Overview:
 
-- **Open tab** (Overview records): tickets whose *current* state is exactly
-  `open`, within the selected period/group/agent scope. A ticket that was open
-  in the past but is now pending/closed/new does not appear.
 - **Open graph** (Overview chart): for each time bucket, the number of tickets
-  whose Open interval *overlaps* that bucket. A ticket open for several days
-  counts on every one of those days. An interval still active is capped at
-  *now*. A ticket that becomes open again counts again for its new open days.
-- **Open interval**: a contiguous span during which a ticket was in state
-  `open`, reconstructed from state history (`value_to == "open"` starts an
-  interval; the next state change ends it). When history is unavailable, an
-  approximation is used: `new` → never open; currently `open` → creation until
-  now; otherwise → creation until close (or last update).
+  *created* in that bucket (`zammad_created_at`). Identical bucketing to
+  Created/Closed, NOT a cumulative overlap of a ticket's open lifetime.
+- **Open tab** (Overview records): tickets whose *current* state is exactly
+  `open`, within the selected period window scope (and group/agent scope). A
+  ticket created in the window but now closed/pending/new does not appear.
+
+The chart's Open line (per-period creations) and the Open tab (currently-open
+tickets) therefore count different sets by design.
 
 ## Reopened
 
@@ -41,3 +37,25 @@ been reopened.
   from the graph's event count.
 - *Reopen rate* (KPIs, agent stats): the percentage of tickets that were
   reopened. Unrelated to the Overview tab/graph.
+
+## Release
+
+A **release** is an immutable, annotated Git tag on the `master` branch named
+`vX.Y.Z` (Semantic Versioning). It is the only unit of deployment: production
+is never deployed from a branch, only from a release. The tag name *is* the
+version — there is no separate version file to keep in sync.
+
+## Deploy
+
+A **deploy** is the act of making the production server run exactly the code
+of one release: the server checks out the release's tag and builds and starts
+the containers from it. It is *triggered* by creating the release on GitHub
+and *executed* by the GitHub Actions runner on the server. A deploy is
+**healthy** when the dashboard's health endpoint answers; it **fails** when
+any step errors or the health check times out, and a failed deploy must leave
+the previously running version serving traffic.
+
+## Rollback
+
+A **rollback** is a deploy of an earlier release. There is no special undo
+mechanism: to roll back, re-run the deploy workflow for the previous tag.

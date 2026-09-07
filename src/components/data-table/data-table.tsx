@@ -17,6 +17,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { cn } from "@/lib/utils";
 
 declare module "@tanstack/react-table" {
+  // Module augmentation: TData/TValue must keep the upstream names (TS2428),
+  // so they can't be renamed to the _ prefix this repo's lint config expects.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   interface ColumnMeta<TData, TValue> {
     label?: string;
     sticky?: "right";

@@ -88,7 +88,7 @@ export const apiClient = {
     return json.user;
   },
 
-  async me(userId: string): Promise<User | null> {
+  async me(_userId: string): Promise<User | null> {
     return request<User | null>("/auth/me");
   },
 
@@ -247,7 +247,7 @@ export const apiClient = {
     return [];
   },
 
-  async createExport(input: any): Promise<ReportExport> {
+  async createExport(input: Omit<ReportExport, "id" | "status" | "created_at" | "completed_at" | "expires_at" | "file_size_bytes">): Promise<ReportExport> {
     return input as ReportExport;
   },
 
@@ -257,7 +257,7 @@ export const apiClient = {
   },
 
   async getSystemSettings(): Promise<SystemSettings> {
-    const health = await request<any>("/system/health");
+    const health = await request<{ zammad?: string }>("/system/health");
     return {
       zammad_base_url: "",
       zammad_api_token_preview: "***",
@@ -272,7 +272,7 @@ export const apiClient = {
     };
   },
 
-  async updateSystemSettings(patch: Partial<SystemSettings>): Promise<SystemSettings> {
+  async updateSystemSettings(_patch: Partial<SystemSettings>): Promise<SystemSettings> {
     return this.getSystemSettings();
   },
 

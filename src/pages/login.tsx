@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
 import { useAuth } from "@/stores/auth";
+import { logoUrl } from "@/lib/version";
 
 const schema = z.object({
   login: z.string().min(1, "Required"),
@@ -50,7 +51,7 @@ export default function LoginPage() {
     <div className="min-h-screen grid lg:grid-cols-2 bg-muted/40">
       <div className="hidden lg:flex flex-col justify-between p-10 bg-sidebar text-sidebar-foreground relative overflow-hidden">
         <div className="flex items-center gap-2 relative z-10">
-          <img src="/mti-logo.png" alt="MTI" className="size-8 rounded-md object-contain bg-white" />
+          <img src={logoUrl} alt="MTI" className="size-8 rounded-md object-contain bg-white" />
           <span className="font-semibold">MTI Ticketing Dashboard</span>
         </div>
         <div className="relative z-10 space-y-4 max-w-md">

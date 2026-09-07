@@ -1,0 +1,59 @@
+name: Deploy
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  deploy:
+    needs: ci
+    runs-on: [self-hosted, production]
+    environment: production
+    env:
+      CHECKOUT_DIR: /opt/zammad-dashboard
+      MARKER_FILE: /opt/zammad-dashboard/.deployed-version
+    steps:
+      - name: Check out release tag on the server
+        run: |
+          set -euo pipefail
+          cd "$CHECKOUT_DIR"
+          git fetch --tags origin
+          git checkout -f "$GITHUB_REF_NAME"
+
+      - name: Deploy
+        run: |
+          set -euo pipefail
+          cd "$CHECKOUT_DIR"
+          DEPLOY_APP_VERSION="$GITHUB_REF_NAME" ./deploy/deploy.sh deploy
+
+      - name: Record deployed version
+        run: echo "$GITHUB_REF_NAME" > "$MARKER_FILE"
+
+      - name: Roll back to previous version
+        if: failure()
+        run: |
+          set -uo pipefail
+          cd "$CHECKOUT_DIR"
+          if [[ ! -s "$MARKER_FILE" ]]; then
+            echo "::error::CRITICAL: deploy of $GITHUB_REF_NAME failed and no previous version is recorded in $MARKER_FILE. Manual intervention required."
+            exit 1
+          fi
+          PREV="$(cat "$MARKER_FILE")"
+          echo "Rolling back to $PREV..."
+          git fetch --tags origin
+          git checkout -f "$PREV"
+          if DEPLOY_APP_VERSION="$PREV" ./deploy/deploy.sh deploy; then
+            echo "$PREV" > "$MARKER_FILE"
+            echo "::error::Deploy of $GITHUB_REF_NAME failed; rolled back to $PREV."
+          else
+            echo "::error::CRITICAL: deploy of $GITHUB_REF_NAME failed AND automatic rollback to $PREV also failed. Manual intervention required."
+            exit 1
+          fi

@@ -64,8 +64,8 @@ def _int_or_none(value) -> int | None:
 
 
 def _map_priority(value) -> str:
-    name = _zammad_name(value, "normal")
-    return {"medium": "normal", "urgent": "very high"}.get(name, name if name in {"low", "normal", "high", "very high"} else "normal")
+    name = _zammad_name(value, "unknown")
+    return {"medium": "normal", "urgent": "very high"}.get(name, name if name in {"low", "normal", "high", "very high"} else "unknown")
 
 
 def _map_state(value) -> str:
@@ -381,7 +381,7 @@ def _sla_progress(ticket: TicketOut, now: datetime) -> int:
 
 def _sla_counts(rows: list[dict]) -> dict:
     with_sla = [t for t in rows if t["live_sla_status"] != "no_sla"]
-    ok = len([t for t in with_sla if t["live_sla_status"] in ("on_track", "closed_on_time")])
+    breached = len([t for t in with_sla if t["live_sla_status"] == "breached"])
     return {
         "total": len(rows),
         "total_with_sla": len(with_sla),
@@ -389,14 +389,14 @@ def _sla_counts(rows: list[dict]) -> dict:
         "warning": len([t for t in rows if t["live_sla_status"] == "warning"]),
         "critical": len([t for t in rows if t["live_sla_status"] == "critical"]),
         "at_risk": len([t for t in rows if t["live_sla_status"] in ("warning", "critical")]),
-        "breached": len([t for t in rows if t["live_sla_status"] == "breached"]),
+        "breached": breached,
         "no_sla": len([t for t in rows if t["live_sla_status"] == "no_sla"]),
-        "compliance_rate": (ok / len(with_sla) * 100) if with_sla else None,
+        "compliance_rate": ((len(with_sla) - breached) / len(with_sla) * 100) if with_sla else None,
     }
 
 
-def _sla_row(name: str, rows: list[dict]) -> dict:
-    return {"name": name, **_sla_counts(rows)}
+def _sla_row(id_: str, name: str, rows: list[dict]) -> dict:
+    return {"id": id_, "name": name, **_sla_counts(rows)}
 
 
 def _avg_minutes(values: list[int | None]) -> int | None:
@@ -408,7 +408,7 @@ def _status_rank(status: str) -> int:
     return {"breached": 0, "critical": 1, "warning": 2, "on_track": 3, "no_sla": 4}.get(status, 5)
 
 
-def _build_sla_monitor(tickets: list[TicketOut], now: datetime | None = None, group_names: list[str] | None = None) -> dict:
+def _build_sla_monitor(tickets: list[TicketOut], now: datetime | None = None, groups: list[tuple[str, str]] | None = None) -> dict:
     now = now or datetime.now(timezone.utc)
     active = [t for t in tickets if t.state in OPEN_STATES]
     closed = [t for t in tickets if t.state == "closed"]
@@ -431,7 +431,6 @@ def _build_sla_monitor(tickets: list[TicketOut], now: datetime | None = None, gr
 
     summary = _sla_counts(rows)
     summary.update({
-        "compliance_rate": summary["compliance_rate"] or 0,
         "total_active": len(active),
         "sla_total": summary["total_with_sla"],
         "total_closed_on_time": len([t for t in closed_rows if t["live_sla_status"] == "closed_on_time"]),
@@ -439,14 +438,14 @@ def _build_sla_monitor(tickets: list[TicketOut], now: datetime | None = None, gr
         "avg_resolution_mins": _avg_minutes([t.close_in_min for t in closed if t.close_at or t.closed_at]),
     })
 
-    priorities = ["very high", "high", "normal", "low"]
-    priority_labels = {"very high": "Urgent", "normal": "Medium"}
-    priority_rows = [_sla_row(priority_labels.get(priority, priority), [t for t in rows if t["priority"] == priority]) for priority in priorities]
-    by_priority = {row["name"]: row for row in priority_rows}
+    priority_labels = {"very high": "Urgent", "high": "High", "normal": "Medium", "low": "Low", "unknown": "Unknown"}
+    priority_rows = [_sla_row(priority, label, [t for t in rows if t["priority"] == priority]) for priority, label in priority_labels.items()]
+    by_priority = {row["id"]: row for row in priority_rows}
 
-    group_names = group_names or sorted({t["group_name"] for t in rows if t["group_name"]})
-    sla_rows = [_sla_row(name, [t for t in rows if t["group_name"] == name]) for name in group_names]
-    by_group = {row["name"]: row for row in sla_rows}
+    if groups is None:
+        groups = sorted({(t["group_id"] or "unknown", t["group_name"] or "Unknown") for t in rows})
+    sla_rows = [_sla_row(group_id, name, [t for t in rows if (t["group_id"] or "unknown") == group_id]) for group_id, name in groups]
+    by_group = {row["id"]: row for row in sla_rows}
 
     today = datetime.combine(now.date(), time.min, tzinfo=timezone.utc)
     day_labels = ["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"]
@@ -571,8 +570,10 @@ async def sla_at_risk(current: Annotated[dict, Depends(get_current_user)], db: A
 async def sla_monitor(current: Annotated[dict, Depends(get_current_user)], db: Annotated[AsyncSession, Depends(get_db)], group_id: str | None = None):
     tickets = _apply_ticket_filters(await _fetch_scoped(current, db), group_id)
     visible_ids = {t.group_id for t in tickets}
-    group_names = sorted(g.name for g in await list_group_rows(db) if g.id in visible_ids)
-    return ApiResponse(data=_build_sla_monitor(tickets, group_names=group_names))
+    groups = sorted((g.id, g.name or "Unknown") for g in await list_group_rows(db) if g.id in visible_ids)
+    if "" in visible_ids:
+        groups.append(("unknown", "Unknown"))
+    return ApiResponse(data=_build_sla_monitor(tickets, groups=groups))
 
 
 @router.get("/overview", response_model=ApiResponse)

@@ -184,7 +184,7 @@ export function fullName(u: User): string {
 // -- Tickets -----------------------------------------------------------------
 const STATES: TicketState[] = ["new", "open", "pending", "closed"];
 const PRIORITIES: TicketPriority[] = ["low", "normal", "high", "very high"];
-const PRIORITY_IDS: Record<TicketPriority, string> = { low: "1", normal: "2", high: "3", "very high": "4" };
+const PRIORITY_IDS: Record<TicketPriority, string> = { low: "1", normal: "2", high: "3", "very high": "4", unknown: "" };
 const STATE_IDS: Record<TicketState, string> = { new: "1", open: "2", pending: "3", closed: "4", merged: "5" };
 const SEVERITIES = [
   { value: "p01", label: "P1 - Critical" },

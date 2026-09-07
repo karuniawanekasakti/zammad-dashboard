@@ -81,7 +81,7 @@ async def main() -> None:
     agent_denied = await tickets.sla_monitor(current=roles["agent"], db=object(), group_id="g2")
     assert {row["id"] for row in agent_allowed.data["tickets"]} == {"1"}
     assert agent_denied.data["tickets"] == []
-    assert [row["name"] for row in agent_allowed.data["sla_rows"]] == ["Group g1"]
+    assert [(row["id"], row["name"]) for row in agent_allowed.data["sla_rows"]] == [("g1", "Group g1")]
 
     print("check_sla_scope: OK")
 

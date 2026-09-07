@@ -150,9 +150,9 @@ function applyTicketSorts(rows: Ticket[], sorts?: string, sortBy?: string, sortD
 
 type LiveSlaStatus = SlaMonitorData["tickets"][number]["live_sla_status"];
 
-function slaCounts(rows: SlaMonitorData["tickets"]): Omit<SlaMonitorData["priority_rows"][number], "name"> {
+function slaCounts(rows: SlaMonitorData["tickets"]): Omit<SlaMonitorData["priority_rows"][number], "id" | "name"> {
   const withSla = rows.filter((t) => t.live_sla_status !== "no_sla");
-  const ok = withSla.filter((t) => t.live_sla_status === "on_track" || t.live_sla_status === "closed_on_time").length;
+  const breached = withSla.filter((t) => t.live_sla_status === "breached").length;
   return {
     total: rows.length,
     total_with_sla: withSla.length,
@@ -160,14 +160,14 @@ function slaCounts(rows: SlaMonitorData["tickets"]): Omit<SlaMonitorData["priori
     warning: rows.filter((t) => t.live_sla_status === "warning").length,
     critical: rows.filter((t) => t.live_sla_status === "critical").length,
     at_risk: rows.filter((t) => t.live_sla_status === "warning" || t.live_sla_status === "critical").length,
-    breached: rows.filter((t) => t.live_sla_status === "breached").length,
+    breached,
     no_sla: rows.filter((t) => t.live_sla_status === "no_sla").length,
-    compliance_rate: withSla.length ? (ok / withSla.length) * 100 : null,
+    compliance_rate: withSla.length ? ((withSla.length - breached) / withSla.length) * 100 : null,
   };
 }
 
-function slaMonitorRow(name: string, rows: SlaMonitorData["tickets"]): SlaMonitorData["priority_rows"][number] {
-  return { name, ...slaCounts(rows) };
+function slaMonitorRow(id: string, name: string, rows: SlaMonitorData["tickets"]): SlaMonitorData["priority_rows"][number] {
+  return { id, name, ...slaCounts(rows) };
 }
 
 function buildMockSlaMonitor(rows: Ticket[]): SlaMonitorData {
@@ -202,20 +202,21 @@ function buildMockSlaMonitor(rows: Ticket[]): SlaMonitorData {
   const avgCloseRows = closed.filter((t) => t.close_at || t.closed_at).map((t) => t.close_in_min).filter((n): n is number => n != null);
   const summary = {
     ...slaCounts(enriched),
-    compliance_rate: slaCounts(enriched).compliance_rate ?? 0,
     total_active: active.length,
     sla_total: slaCounts(enriched).total_with_sla,
     total_closed_on_time: closedEnriched.filter((t) => t.live_sla_status === "closed_on_time").length,
     avg_resolution_minutes: avgCloseRows.length ? Math.round(avgCloseRows.reduce((sum, n) => sum + n, 0) / avgCloseRows.length) : null,
     avg_resolution_mins: avgCloseRows.length ? Math.round(avgCloseRows.reduce((sum, n) => sum + n, 0) / avgCloseRows.length) : null,
   };
-  const priority_rows = (["very high", "high", "normal", "low"] as TicketPriority[]).map((p) => slaMonitorRow(p === "very high" ? "Urgent" : p === "normal" ? "Medium" : p, enriched.filter((t) => t.priority === p)));
-  const sla_rows = [...new Set(enriched.map((t) => t.group_name).filter(Boolean))].sort().map((name) => slaMonitorRow(name, enriched.filter((t) => t.group_name === name)));
+  const priorityLabels: Record<TicketPriority, string> = { "very high": "Urgent", high: "High", normal: "Medium", low: "Low", unknown: "Unknown" };
+  const priority_rows = (Object.entries(priorityLabels) as [TicketPriority, string][]).map(([priority, label]) => slaMonitorRow(priority, label, enriched.filter((t) => t.priority === priority)));
+  const groups = new Map(enriched.map((t) => [t.group_id || "unknown", t.group_name || "Unknown"]));
+  const sla_rows = [...groups].sort((a, b) => a[0].localeCompare(b[0])).map(([id, name]) => slaMonitorRow(id, name, enriched.filter((t) => (t.group_id || "unknown") === id)));
   return {
     ...summary,
     summary,
-    by_priority: Object.fromEntries(priority_rows.map((row) => [row.name, row])),
-    by_group: Object.fromEntries(sla_rows.map((row) => [row.name, row])),
+    by_priority: Object.fromEntries(priority_rows.map((row) => [row.id, row])),
+    by_group: Object.fromEntries(sla_rows.map((row) => [row.id, row])),
     priority_rows,
     sla_rows,
     trend,

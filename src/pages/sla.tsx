@@ -90,7 +90,7 @@ export default function SlaPage() {
       </Card>
 
       <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
-        <KpiCard title="Compliance Rate" value={formatPercent(data.summary.compliance_rate, 0)} helper={`${formatNumber(data.summary.on_track)} of ${formatNumber(data.summary.total_with_sla)} tiket met SLA`} icon={CheckCircle2} iconClassName={complianceIcon(data.summary.compliance_rate)} />
+        <KpiCard title="Compliance Rate" value={data.summary.compliance_rate == null ? "-" : formatPercent(data.summary.compliance_rate, 0)} helper={`${formatNumber(data.summary.total_with_sla - data.summary.breached)} of ${formatNumber(data.summary.total_with_sla)} tiket met SLA`} icon={CheckCircle2} iconClassName={complianceIcon(data.summary.compliance_rate)} />
         <KpiCard title="On Track" value={formatNumber(data.summary.on_track)} helper="within SLA deadline" icon={CheckCircle2} iconClassName="bg-emerald-500/15 text-emerald-600" />
         <KpiCard title="At-Risk" value={formatNumber(data.summary.at_risk)} helper="deadline < 30 menit" icon={AlertTriangle} iconClassName="bg-amber-500/15 text-amber-600" />
         <KpiCard title="Breached" value={formatNumber(data.summary.breached)} helper="SLA deadline passed" icon={Flame} iconClassName="bg-red-500/15 text-red-600" />
@@ -328,6 +328,7 @@ function formatDate(value: string | null) {
   return value ? new Date(value).toLocaleString() : "-";
 }
 
-function complianceIcon(rate: number) {
+function complianceIcon(rate: number | null) {
+  if (rate == null) return "bg-muted text-muted-foreground";
   return rate >= 90 ? "bg-emerald-500/15 text-emerald-600" : rate >= 75 ? "bg-amber-500/15 text-amber-600" : "bg-red-500/15 text-red-600";
 }

@@ -70,10 +70,22 @@ def main() -> None:
     assert data["summary"]["sla_total"] == 125
     assert [row["id"] for row in data["risk_rows"][:3]] == ["205", "202", "203"]
 
-    all_group_data = _build_sla_monitor(rows, now, group_names=["g1", "g2", "g3"])
-    assert [row["name"] for row in all_group_data["sla_rows"]] == ["g1", "g2", "g3"]
+    all_group_data = _build_sla_monitor(rows, now, groups=[("g1", "Support"), ("g2", "Support"), ("g3", "Empty")])
+    assert [(row["id"], row["name"]) for row in all_group_data["sla_rows"]] == [("g1", "Support"), ("g2", "Support"), ("g3", "Empty")]
     assert all_group_data["by_group"]["g2"]["total"] == 1
     assert all_group_data["by_group"]["g3"]["total"] == 0
+    assert all_group_data["summary"]["total_active"] == sum(all_group_data["summary"][key] for key in ("on_track", "warning", "critical", "breached", "no_sla"))
+    assert all_group_data["summary"]["total_with_sla"] == all_group_data["summary"]["total_active"] - all_group_data["summary"]["no_sla"]
+    assert all_group_data["summary"]["at_risk"] == all_group_data["summary"]["warning"] + all_group_data["summary"]["critical"]
+    expected_compliance = (all_group_data["summary"]["total_with_sla"] - all_group_data["summary"]["breached"]) / all_group_data["summary"]["total_with_sla"] * 100
+    assert all_group_data["summary"]["compliance_rate"] == expected_compliance
+
+    unknown_data = _build_sla_monitor([
+        ticket(206, group_id="", group_name="", priority="unknown", escalation_at=None),
+    ], now)
+    assert unknown_data["summary"]["compliance_rate"] is None
+    assert unknown_data["by_group"]["unknown"]["name"] == "Unknown"
+    assert unknown_data["by_priority"]["unknown"]["total"] == 1
 
     group_data = _build_sla_monitor(_apply_ticket_filters(rows, "g2"), now)
     assert group_data["summary"]["total_active"] == 1

@@ -23,7 +23,7 @@ export function ThemeProvider({
   useEffect(() => {
     const root = document.documentElement;
     root.classList.remove("light", "dark");
-    let applied: "dark" | "light" = "light";
+    let applied: "dark" | "light";
     if (theme === "system") {
       applied = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
     } else {

@@ -269,9 +269,9 @@ function EmptyRow({ colSpan, text }: { colSpan: number; text: string }) {
   return <TableRow><TableCell colSpan={colSpan} className="py-10 text-center text-muted-foreground">{text}</TableCell></TableRow>;
 }
 
-function TrendTooltip({ active, payload }: any) {
+function TrendTooltip({ active, payload }: { active?: boolean; payload?: { payload: SlaMonitorData["trend"][number] }[] }) {
   if (!active || !payload?.length) return null;
-  const d = payload[0].payload as SlaMonitorData["trend"][number];
+  const d = payload[0].payload;
   return (
     <div className="rounded-md border bg-popover p-3 text-xs shadow-sm">
       <div className="font-medium">{d.date}</div>

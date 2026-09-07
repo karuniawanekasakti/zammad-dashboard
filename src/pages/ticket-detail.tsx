@@ -559,7 +559,7 @@ function normalizeHistory(row: TicketHistory, index: number) {
 
   const objLabel = obj?.replace("::", " ") ?? "";
 
-  let title = "";
+  let title: string;
   if (type === "created" && obj) {
     title = `created ${objLabel}`;
   } else if (type === "updated" && obj) {

@@ -419,8 +419,6 @@ const mockApi = {
     params: { period: OverviewPeriod; year: number; month?: number; week?: string; day?: string; group_id?: string | "all"; owner_id?: string | "all"; tab?: OverviewTab; page?: number; page_size?: number }
   ): Promise<OverviewData> {
     const buckets = overviewBuckets(params.period, params.year, params.month, params.week, params.day);
-    const start = buckets[0].start.getTime();
-    const end = buckets[buckets.length - 1].end.getTime();
     let scopedTickets = applyScope(tickets, scope);
     if (params.group_id && params.group_id !== "all") scopedTickets = scopedTickets.filter((t) => t.group_id === params.group_id);
     if (params.owner_id && params.owner_id !== "all") scopedTickets = scopedTickets.filter((t) => t.owner_id === params.owner_id);
@@ -570,7 +568,7 @@ const mockApi = {
     return delay([...channels]);
   },
 
-  async testChannel(id: string): Promise<{ ok: boolean }> {
+  async testChannel(_id: string): Promise<{ ok: boolean }> {
     return delay({ ok: Math.random() > 0.1 }, 500);
   },
 

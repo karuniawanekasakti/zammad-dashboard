@@ -353,10 +353,12 @@ def _effective_sla_status(ticket: TicketOut, now: datetime) -> str:
     deadline = _sla_deadline(ticket)
     if not deadline:
         return "no_sla"
+    if ticket.first_response_breached or ticket.close_breached or ticket.sla_status == "breached":
+        return "breached"
     closed_at = _as_utc(ticket.close_at or ticket.closed_at)
     if ticket.state in ("closed", "merged"):
         return "closed_on_time" if closed_at and closed_at <= deadline else "breached"
-    if ticket.first_response_breached or ticket.close_breached or ticket.sla_status == "breached" or now > deadline:
+    if now > deadline:
         return "breached"
     remaining = (deadline - now).total_seconds()
     if remaining <= 30 * 60:
@@ -411,7 +413,7 @@ def _status_rank(status: str) -> int:
 def _build_sla_monitor(tickets: list[TicketOut], now: datetime | None = None, groups: list[tuple[str, str]] | None = None) -> dict:
     now = now or datetime.now(timezone.utc)
     active = [t for t in tickets if t.state in OPEN_STATES]
-    closed = [t for t in tickets if t.state == "closed"]
+    closed = [t for t in tickets if t.state in ("closed", "merged")]
 
     rows = []
     for ticket in active:
@@ -453,7 +455,7 @@ def _build_sla_monitor(tickets: list[TicketOut], now: datetime | None = None, gr
     for i in range(7):
         start = today - timedelta(days=6 - i)
         end = start + timedelta(days=1)
-        day_closed = [t for t in closed if (closed_at := _as_utc(t.close_at or t.closed_at)) and start <= closed_at < end]
+        day_closed = [t for t in closed if _sla_deadline(t) and (closed_at := _as_utc(t.close_at or t.closed_at)) and start <= closed_at < end]
         breach_count = len([t for t in day_closed if _effective_sla_status(t, now) == "breached"])
         trend.append({"date": start.date().isoformat(), "day": day_labels[start.weekday() + 1 if start.weekday() < 6 else 0], "rate": ((len(day_closed) - breach_count) / len(day_closed) * 100) if day_closed else 0, "total": len(day_closed), "breach": breach_count})
 
@@ -466,7 +468,7 @@ def _build_sla_monitor(tickets: list[TicketOut], now: datetime | None = None, gr
             grid[dt.weekday()][dt.hour] += 1
 
     rows.sort(key=lambda t: (_status_rank(t["live_sla_status"]), t["sla_remaining_ms"] if t["sla_remaining_ms"] is not None else 10**15))
-    breach_log = [t for t in closed if _effective_sla_status(t, now) == "breached"]
+    breach_log = [t for t in closed if _sla_deadline(t) and _effective_sla_status(t, now) == "breached"]
     breach_log.sort(key=lambda t: _as_utc(t.close_at or t.closed_at) or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
 
     return {

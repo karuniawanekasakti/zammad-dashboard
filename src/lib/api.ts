@@ -173,7 +173,7 @@ function slaMonitorRow(id: string, name: string, rows: SlaMonitorData["tickets"]
 function buildMockSlaMonitor(rows: Ticket[]): SlaMonitorData {
   const now = new Date();
   const active = rows.filter((t) => t.state === "new" || t.state === "open" || t.state === "pending");
-  const closed = rows.filter((t) => t.state === "closed");
+  const closed = rows.filter((t) => t.state === "closed" || t.state === "merged");
   const enriched = active.map((t) => ({ ...t, actionable_deadline: slaDeadline(t)?.toISOString() ?? null, live_sla_status: slaStatus(t, now), sla_remaining_ms: slaRemainingMs(t, now), sla_progress: slaProgress(t, now) }));
   const closedEnriched = closed.map((t) => ({ ...t, actionable_deadline: slaDeadline(t)?.toISOString() ?? null, live_sla_status: slaStatus(t, now), sla_remaining_ms: slaRemainingMs(t, now), sla_progress: slaProgress(t, now) }));
   const grid = Array.from({ length: 7 }, () => Array(24).fill(0));
@@ -190,6 +190,7 @@ function buildMockSlaMonitor(rows: Ticket[]): SlaMonitorData {
     const next = new Date(day);
     next.setDate(day.getDate() + 1);
     const dayRows = closed.filter((t) => {
+      if (!slaDeadline(t)) return false;
       const close = new Date(t.close_at ?? t.closed_at ?? 0).getTime();
       return day.getTime() <= close && close < next.getTime();
     });
@@ -198,7 +199,7 @@ function buildMockSlaMonitor(rows: Ticket[]): SlaMonitorData {
   });
   const rank: Record<LiveSlaStatus, number> = { breached: 0, critical: 1, warning: 2, on_track: 3, safe: 3, no_sla: 4, closed_on_time: 5 };
   enriched.sort((a, b) => rank[a.live_sla_status] - rank[b.live_sla_status] || (a.sla_remaining_ms ?? Infinity) - (b.sla_remaining_ms ?? Infinity));
-  const breachLog = closed.filter((t) => slaStatus(t, now) === "breached").sort((a, b) => new Date(b.close_at ?? b.closed_at ?? 0).getTime() - new Date(a.close_at ?? a.closed_at ?? 0).getTime());
+  const breachLog = closed.filter((t) => slaDeadline(t) && slaStatus(t, now) === "breached").sort((a, b) => new Date(b.close_at ?? b.closed_at ?? 0).getTime() - new Date(a.close_at ?? a.closed_at ?? 0).getTime());
   const avgCloseRows = closed.filter((t) => t.close_at || t.closed_at).map((t) => t.close_in_min).filter((n): n is number => n != null);
   const summary = {
     ...slaCounts(enriched),

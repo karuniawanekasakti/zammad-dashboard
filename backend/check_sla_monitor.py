@@ -186,6 +186,20 @@ def main() -> None:
     ], now)["tickets"]
     assert [row["id"] for row in sorted_rows] == ["315", "314"]
 
+    closed_at = now - timedelta(hours=1)
+    history = _build_sla_monitor([
+        ticket(400, state="closed", closed_at=closed_at, close_at=closed_at, escalation_at=closed_at + timedelta(hours=1)),
+        ticket(401, state="closed", closed_at=closed_at, close_at=closed_at, escalation_at=closed_at - timedelta(hours=1)),
+        ticket(402, state="merged", closed_at=closed_at, close_at=closed_at, escalation_at=closed_at + timedelta(hours=1), close_breached=True),
+        ticket(403, state="merged", closed_at=closed_at, close_at=closed_at, escalation_at=None),
+    ], now)
+    today = next(point for point in history["trend"] if point["date"] == closed_at.date().isoformat())
+    assert history["summary"]["total_active"] == 0
+    assert today["total"] == 3
+    assert today["breach"] == 2
+    assert round(today["rate"], 6) == round(100 / 3, 6)
+    assert {row["id"] for row in history["breach_log"]} == {"401", "402"}
+
 
 if __name__ == "__main__":
     main()

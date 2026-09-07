@@ -30,11 +30,12 @@ export function slaDeadline(ticket: SlaDeadlineFields): Date | null {
 export function slaStatus(ticket: SlaStatusFields, now: Date): SlaStatus {
   const deadline = slaDeadline(ticket);
   if (!deadline) return "no_sla";
+  if (ticket.first_response_breached || ticket.close_breached || ticket.sla_status === "breached") return "breached";
   if (ticket.state === "closed" || ticket.state === "merged") {
     const closedAt = ticket.close_at ?? ticket.closed_at;
     return closedAt && new Date(closedAt) <= deadline ? "closed_on_time" : "breached";
   }
-  if (ticket.first_response_breached || ticket.close_breached || ticket.sla_status === "breached" || now > deadline) return "breached";
+  if (now > deadline) return "breached";
   const remaining = (deadline.getTime() - now.getTime()) / 1000;
   if (remaining <= 30 * 60) return "critical";
   if (remaining <= 2 * 60 * 60) return "warning";

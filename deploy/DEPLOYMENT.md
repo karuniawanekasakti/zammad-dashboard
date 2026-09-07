@@ -2,6 +2,8 @@
 
 This project deploys with Docker Compose on the same Linux server that runs production Zammad. The dashboard binds to loopback by default so it does not take over Zammad's public `80/443` listener.
 
+> This document is the server-setup runbook. Production releases are deployed automatically by GitHub Actions when a release tag is pushed — see [docs/CI-CD.md](../docs/CI-CD.md) for the release/deploy/rollback flow. The manual deploy below remains the fallback.
+
 ## Server prerequisites
 
 - Docker with the Compose plugin (`docker compose version`).
@@ -79,15 +81,18 @@ The script:
 1. Validates required commands and `.env` values.
 2. Warns about branch mismatch or uncommitted changes.
 3. Optionally runs `git pull --ff-only` when `DEPLOY_PULL=true`.
-4. Runs `docker compose --env-file .env -f docker-compose.yml -f deploy/docker-compose.prod.yml up -d --build --remove-orphans`.
-5. Waits for `GET /api/v1/system/health` through the local web container.
-6. Prints service status and the local upstream URL.
+4. Builds images.
+5. Applies database migrations as a one-shot container (`docker compose run --rm --no-deps api alembic upgrade head`) — a failing migration aborts the deploy before any container is switched.
+6. Starts/switches containers and waits for `GET /api/v1/system/health` through the local web container.
+7. Prints service status and the local upstream URL.
 
-Migrations run automatically in `backend/Dockerfile` before Uvicorn starts:
+The migration also still runs in `backend/Dockerfile` before Uvicorn starts (running it twice is a no-op):
 
 ```bash
 alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
+
+Set `DEPLOY_APP_VERSION=<tag>` in the environment to bake a version string into the frontend build (shown in the sidebar); the deploy workflow sets this automatically, and manual deploys default to `dev`.
 
 ## Useful commands
 

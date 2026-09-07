@@ -28,7 +28,7 @@ const STATUS_META: Record<SlaStatus, { label: string; bar: string; text: string;
   warning: { label: "Warning", bar: "bg-amber-500", text: "text-amber-600 dark:text-amber-400", icon: "bg-amber-500" },
   critical: { label: "Critical", bar: "bg-orange-500", text: "text-orange-600 dark:text-orange-400", icon: "bg-orange-500" },
   breached: { label: "Breached", bar: "bg-red-600", text: "text-red-600 dark:text-red-400", icon: "bg-red-600" },
-  no_sla: { label: "No SLA", bar: "bg-muted-foreground", text: "text-muted-foreground", icon: "bg-muted-foreground" },
+  no_sla: { label: "Unmonitored", bar: "bg-muted-foreground", text: "text-muted-foreground", icon: "bg-muted-foreground" },
   closed_on_time: { label: "Closed on time", bar: "bg-emerald-500", text: "text-emerald-600 dark:text-emerald-400", icon: "bg-emerald-500" },
 };
 
@@ -237,7 +237,7 @@ function RiskRow({ ticket }: { ticket: SlaMonitorTicket }) {
       <TableCell><PriorityBadge priority={ticket.priority} /></TableCell>
       <TableCell className="text-sm">{ticket.group_name}</TableCell>
       <TableCell className="text-sm">{ticket.owner_name ?? "-"}</TableCell>
-      <TableCell className="text-sm">{formatDate(ticket.escalation_at ?? ticket.first_response_escalation_at ?? ticket.close_escalation_at)}</TableCell>
+      <TableCell className="text-sm">{formatDate(ticket.actionable_deadline)}</TableCell>
       <TableCell className="min-w-[170px]">
         <div className={cn("mb-1 flex items-center gap-2 text-sm font-medium", meta.text)}>
           <span className={cn("size-2 rounded-full", meta.icon)} />

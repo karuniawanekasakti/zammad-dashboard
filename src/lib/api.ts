@@ -1,3 +1,4 @@
+import { slaDeadline, slaProgress, slaRemainingMs, slaStatus } from "@/lib/sla-deadline";
 import {
   agentStats,
   alertRules,
@@ -149,38 +150,6 @@ function applyTicketSorts(rows: Ticket[], sorts?: string, sortBy?: string, sortD
 
 type LiveSlaStatus = SlaMonitorData["tickets"][number]["live_sla_status"];
 
-function slaDeadline(ticket: Ticket): Date | null {
-  const values = [ticket.escalation_at, ticket.first_response_escalation_at, ticket.update_escalation_at, ticket.close_escalation_at].filter(Boolean) as string[];
-  return values.length ? new Date(Math.min(...values.map((v) => new Date(v).getTime()))) : null;
-}
-
-function slaStatus(ticket: Ticket, now: Date): LiveSlaStatus {
-  const deadline = slaDeadline(ticket);
-  if (!deadline) return "no_sla";
-  if (ticket.state === "closed" || ticket.state === "merged") {
-    const closedAt = ticket.close_at ?? ticket.closed_at;
-    return closedAt && new Date(closedAt) <= deadline ? "closed_on_time" : "breached";
-  }
-  if (ticket.first_response_breached || ticket.close_breached || ticket.sla_status === "breached" || now > deadline) return "breached";
-  const remaining = (deadline.getTime() - now.getTime()) / 1000;
-  if (remaining <= 30 * 60) return "critical";
-  if (remaining <= 2 * 60 * 60) return "warning";
-  return "on_track";
-}
-
-function slaRemainingMs(ticket: Ticket, now: Date): number | null {
-  const deadline = slaDeadline(ticket);
-  return deadline ? deadline.getTime() - now.getTime() : null;
-}
-
-function slaProgress(ticket: Ticket, now: Date): number {
-  const deadline = slaDeadline(ticket);
-  if (!deadline) return 0;
-  const start = new Date(ticket.zammad_created_at).getTime();
-  const end = deadline.getTime();
-  return end <= start ? 0 : Math.max(0, Math.min(100, Math.round(((now.getTime() - start) / (end - start)) * 100)));
-}
-
 function slaCounts(rows: SlaMonitorData["tickets"]): Omit<SlaMonitorData["priority_rows"][number], "name"> {
   const withSla = rows.filter((t) => t.live_sla_status !== "no_sla");
   const ok = withSla.filter((t) => t.live_sla_status === "on_track" || t.live_sla_status === "closed_on_time").length;
@@ -205,8 +174,8 @@ function buildMockSlaMonitor(rows: Ticket[]): SlaMonitorData {
   const now = new Date();
   const active = rows.filter((t) => t.state === "new" || t.state === "open" || t.state === "pending");
   const closed = rows.filter((t) => t.state === "closed");
-  const enriched = active.map((t) => ({ ...t, live_sla_status: slaStatus(t, now), sla_remaining_ms: slaRemainingMs(t, now), sla_progress: slaProgress(t, now) }));
-  const closedEnriched = closed.map((t) => ({ ...t, live_sla_status: slaStatus(t, now), sla_remaining_ms: slaRemainingMs(t, now), sla_progress: slaProgress(t, now) }));
+  const enriched = active.map((t) => ({ ...t, actionable_deadline: slaDeadline(t)?.toISOString() ?? null, live_sla_status: slaStatus(t, now), sla_remaining_ms: slaRemainingMs(t, now), sla_progress: slaProgress(t, now) }));
+  const closedEnriched = closed.map((t) => ({ ...t, actionable_deadline: slaDeadline(t)?.toISOString() ?? null, live_sla_status: slaStatus(t, now), sla_remaining_ms: slaRemainingMs(t, now), sla_progress: slaProgress(t, now) }));
   const grid = Array.from({ length: 7 }, () => Array(24).fill(0));
   enriched.filter((t) => t.live_sla_status === "breached").forEach((t) => {
     const d = slaDeadline(t) ?? new Date(t.zammad_updated_at);

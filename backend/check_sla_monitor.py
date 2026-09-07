@@ -80,6 +80,100 @@ def main() -> None:
     assert group_data["summary"]["on_track"] == 1
     assert len(group_data["tickets"]) == 1
 
+    current_escalation = now + timedelta(hours=4)
+    satisfied_response = _build_sla_monitor([
+        ticket(
+            300,
+            escalation_at=current_escalation,
+            first_response_at=now - timedelta(hours=5),
+            first_response_escalation_at=now - timedelta(hours=6),
+            first_response_diff_in_min=60,
+        )
+    ], now)["tickets"][0]
+    assert satisfied_response["live_sla_status"] == "on_track"
+    assert satisfied_response["actionable_deadline"] == current_escalation.isoformat()
+    assert satisfied_response["sla_remaining_ms"] == 4 * 60 * 60 * 1000
+
+    first_response_deadline = now + timedelta(hours=1)
+    unsatisfied_response = _build_sla_monitor([
+        ticket(
+            301,
+            escalation_at=None,
+            first_response_escalation_at=first_response_deadline,
+            update_escalation_at=now + timedelta(minutes=15),
+            close_escalation_at=now + timedelta(hours=3),
+        )
+    ], now)["tickets"][0]
+    assert unsatisfied_response["actionable_deadline"] == first_response_deadline.isoformat()
+    assert unsatisfied_response["live_sla_status"] == "warning"
+
+    update_deadline = now + timedelta(hours=3)
+    completed_response = _build_sla_monitor([
+        ticket(
+            302,
+            escalation_at=None,
+            first_response_at=now - timedelta(hours=1),
+            first_response_escalation_at=now - timedelta(hours=2),
+            update_escalation_at=update_deadline,
+            close_escalation_at=now + timedelta(hours=5),
+            zammad_created_at=now - timedelta(hours=3),
+        )
+    ], now)["tickets"][0]
+    assert completed_response["actionable_deadline"] == update_deadline.isoformat()
+    assert completed_response["sla_progress"] == 50
+
+    positive_diff_response = _build_sla_monitor([
+        ticket(
+            303,
+            escalation_at=None,
+            first_response_at=None,
+            first_response_escalation_at=now - timedelta(hours=2),
+            first_response_diff_in_min=30,
+            update_escalation_at=update_deadline,
+        )
+    ], now)["tickets"][0]
+    assert positive_diff_response["actionable_deadline"] == update_deadline.isoformat()
+
+    for id_, evidence in enumerate((
+        {"first_response_breached": True},
+        {"close_breached": True},
+        {"sla_status": "breached"},
+    ), start=304):
+        preserved_breach = _build_sla_monitor([
+            ticket(id_, escalation_at=now + timedelta(hours=4), **evidence)
+        ], now)["tickets"][0]
+        assert preserved_breach["live_sla_status"] == "breached"
+
+    boundary_rows = _build_sla_monitor([
+        ticket(307, escalation_at=now + timedelta(minutes=30)),
+        ticket(308, escalation_at=now + timedelta(minutes=30, seconds=1)),
+        ticket(309, escalation_at=now + timedelta(hours=2)),
+        ticket(310, escalation_at=now + timedelta(hours=2, seconds=1)),
+        ticket(311, escalation_at=now - timedelta(seconds=1)),
+        ticket(312, escalation_at=None),
+    ], now)["tickets"]
+    assert {row["id"]: row["live_sla_status"] for row in boundary_rows} == {
+        "307": "critical",
+        "308": "warning",
+        "309": "warning",
+        "310": "on_track",
+        "311": "breached",
+        "312": "no_sla",
+    }
+    assert next(row for row in boundary_rows if row["id"] == "312")["actionable_deadline"] is None
+
+    heatmap_deadline = now + timedelta(days=1, hours=4)
+    heatmap = _build_sla_monitor([
+        ticket(313, escalation_at=heatmap_deadline, first_response_breached=True)
+    ], now)["heatmap"]
+    assert heatmap["grid"][heatmap_deadline.weekday()][heatmap_deadline.hour] == 1
+
+    sorted_rows = _build_sla_monitor([
+        ticket(314, escalation_at=None, first_response_at=now, first_response_escalation_at=now - timedelta(days=1), update_escalation_at=now + timedelta(minutes=90)),
+        ticket(315, escalation_at=None, first_response_at=now, first_response_escalation_at=now - timedelta(days=1), update_escalation_at=now + timedelta(minutes=60)),
+    ], now)["tickets"]
+    assert [row["id"] for row in sorted_rows] == ["315", "314"]
+
 
 if __name__ == "__main__":
     main()

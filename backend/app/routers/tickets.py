@@ -107,14 +107,24 @@ def _map_ticket(t: dict) -> TicketOut:
     """Map Zammad ticket JSON to our schema."""
     now = datetime.now(timezone.utc)
     escalation_at = _parse_zammad_dt(t.get("escalation_at"))
+    first_response_at = _parse_zammad_dt(t.get("first_response_at"))
     first_response_deadline = _parse_zammad_dt(t.get("first_response_escalation_at") or t.get("sla_response_at"))
+    update_deadline = _parse_zammad_dt(t.get("update_escalation_at") or t.get("sla_update_at"))
+    close_at = _parse_zammad_dt(t.get("close_at"))
     close_deadline = _parse_zammad_dt(t.get("close_escalation_at") or t.get("solution_escalation_at") or t.get("sla_solution_at"))
-    deadline = escalation_at or first_response_deadline or close_deadline
-    remaining = int((deadline - now).total_seconds()) if deadline else None
     first_response_diff = _int_or_none(t.get("first_response_diff_in_min"))
     close_diff = _int_or_none(t.get("close_diff_in_min"))
-    first_response_breached = bool(first_response_diff is not None and first_response_diff < 0) or bool(first_response_deadline and first_response_deadline < now)
-    close_breached = bool(close_diff is not None and close_diff < 0) or bool(close_deadline and close_deadline < now)
+    first_response_satisfied = bool(first_response_at or (first_response_diff is not None and first_response_diff >= 0))
+    deadline = escalation_at or (first_response_deadline if not first_response_satisfied else None) or update_deadline or close_deadline
+    remaining = int((deadline - now).total_seconds()) if deadline else None
+    first_response_breached = first_response_diff < 0 if first_response_diff is not None else bool(
+        first_response_at and first_response_deadline and first_response_at > first_response_deadline
+        or not first_response_at and first_response_deadline and first_response_deadline < now
+    )
+    close_breached = close_diff < 0 if close_diff is not None else bool(
+        close_at and close_deadline and close_at > close_deadline
+        or not close_at and close_deadline and close_deadline < now
+    )
     sla_status = "breached" if (remaining is not None and remaining < 0) or close_breached else _sla_bucket(remaining)
 
     severity = _custom_field_value(t.get("priority_case"))
@@ -141,15 +151,15 @@ def _map_ticket(t: dict) -> TicketOut:
         tags=t.get("tags") if isinstance(t.get("tags"), list) else [],
         sla_status=sla_status,
         escalation_at=escalation_at,
-        first_response_at=_parse_zammad_dt(t.get("first_response_at")),
+        first_response_at=first_response_at,
         first_response_escalation_at=first_response_deadline,
         first_response_in_min=_int_or_none(t.get("first_response_in_min")),
         first_response_diff_in_min=first_response_diff,
-        close_at=_parse_zammad_dt(t.get("close_at")),
+        close_at=close_at,
         close_escalation_at=close_deadline,
         close_in_min=_int_or_none(t.get("close_in_min")),
         close_diff_in_min=close_diff,
-        update_escalation_at=_parse_zammad_dt(t.get("update_escalation_at") or t.get("sla_update_at")),
+        update_escalation_at=update_deadline,
         update_diff_in_min=_int_or_none(t.get("update_diff_in_min")),
         first_response_remaining_secs=remaining,
         first_response_breached=first_response_breached,
@@ -331,13 +341,12 @@ def _apply_ticket_filters(tickets: list[TicketOut], group_id: str | None = None,
 
 
 def _sla_deadline(ticket: TicketOut) -> datetime | None:
-    deadlines = [
-        _as_utc(ticket.escalation_at),
-        _as_utc(ticket.first_response_escalation_at),
-        _as_utc(ticket.update_escalation_at),
-        _as_utc(ticket.close_escalation_at),
-    ]
-    return min((dt for dt in deadlines if dt), default=None)
+    if ticket.escalation_at:
+        return _as_utc(ticket.escalation_at)
+    first_response_satisfied = bool(ticket.first_response_at or (ticket.first_response_diff_in_min is not None and ticket.first_response_diff_in_min >= 0))
+    if not first_response_satisfied and ticket.first_response_escalation_at:
+        return _as_utc(ticket.first_response_escalation_at)
+    return _as_utc(ticket.update_escalation_at or ticket.close_escalation_at)
 
 
 def _effective_sla_status(ticket: TicketOut, now: datetime) -> str:
@@ -406,16 +415,18 @@ def _build_sla_monitor(tickets: list[TicketOut], now: datetime | None = None, gr
 
     rows = []
     for ticket in active:
+        deadline = _sla_deadline(ticket)
         status = _effective_sla_status(ticket, now)
         data = ticket.model_dump(mode="json")
-        data.update({"live_sla_status": status, "sla_remaining_ms": _sla_remaining_ms(ticket, now), "sla_progress": _sla_progress(ticket, now)})
+        data.update({"actionable_deadline": deadline.isoformat() if deadline else None, "live_sla_status": status, "sla_remaining_ms": _sla_remaining_ms(ticket, now), "sla_progress": _sla_progress(ticket, now)})
         rows.append(data)
 
     closed_rows = []
     for ticket in closed:
+        deadline = _sla_deadline(ticket)
         status = _effective_sla_status(ticket, now)
         data = ticket.model_dump(mode="json")
-        data.update({"live_sla_status": status, "sla_remaining_ms": _sla_remaining_ms(ticket, now), "sla_progress": _sla_progress(ticket, now)})
+        data.update({"actionable_deadline": deadline.isoformat() if deadline else None, "live_sla_status": status, "sla_remaining_ms": _sla_remaining_ms(ticket, now), "sla_progress": _sla_progress(ticket, now)})
         closed_rows.append(data)
 
     summary = _sla_counts(rows)

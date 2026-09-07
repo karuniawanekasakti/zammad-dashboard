@@ -80,6 +80,7 @@ export interface Ticket {
 }
 
 export interface SlaMonitorTicket extends Ticket {
+  actionable_deadline: string | null;
   live_sla_status: SlaStatus;
   sla_remaining_ms: number | null;
   sla_progress: number;

@@ -15,7 +15,7 @@ const MAP: Record<SlaStatus, { variant: "success" | "warning" | "destructive" | 
   warning: { variant: "warning", label: "Warning", dot: "bg-amber-500" },
   critical: { variant: "destructive", label: "Critical", dot: "bg-orange-500" },
   breached: { variant: "destructive", label: "Breached", dot: "bg-red-600" },
-  no_sla: { variant: "secondary", label: "No SLA", dot: "bg-muted-foreground" },
+  no_sla: { variant: "secondary", label: "Unmonitored", dot: "bg-muted-foreground" },
   closed_on_time: { variant: "success", label: "Closed on time", dot: "bg-emerald-500" },
 };
 

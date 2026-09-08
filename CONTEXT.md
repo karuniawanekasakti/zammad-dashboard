@@ -38,6 +38,18 @@ been reopened.
 - *Reopen rate* (KPIs, agent stats): the percentage of tickets that were
   reopened. Unrelated to the Overview tab/graph.
 
+## SLA Monitoring
+
+**Authorized scope** is the ticket population the signed-in role may access before any dashboard filter is applied: administrators see all synchronized tickets, agents see their own tickets, and team leads or project managers see tickets in their assigned groups.
+
+An **active ticket** is currently `new`, `open`, or `pending`. A **monitored ticket** is an active ticket with an actionable SLA deadline. An active ticket without one is **Unmonitored** (`no_sla`).
+
+The **actionable deadline** is Zammad's current escalation deadline, or otherwise the next unsatisfied milestone deadline. A completed first-response milestone is not actionable.
+
+**Warning** means the deadline is at most two hours away; **Critical** means it is at most 30 minutes away. **At-Risk** is Warning plus Critical. **Breached** means the actionable deadline passed or synchronized breach evidence exists; later milestones do not erase that evidence.
+
+**Current compliance** is `(monitored - breached) / monitored`; Warning and Critical remain compliant until breach, and the rate is undefined when there are no monitored tickets. **Historical compliance** uses only SLA-evidenced terminal (`closed` or `merged`) outcomes in the selected authorized group and priority scope.
+
 ## Release
 
 A **release** is an immutable, annotated Git tag on the `master` branch named

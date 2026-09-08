@@ -20,17 +20,16 @@ type SlaStatusFields = SlaDeadlineFields & Pick<Ticket,
 
 export function slaDeadline(ticket: SlaDeadlineFields): Date | null {
   const firstResponseSatisfied = ticket.first_response_at != null || (ticket.first_response_diff_in_min != null && ticket.first_response_diff_in_min >= 0);
-  const value = ticket.escalation_at
-    ?? (!firstResponseSatisfied ? ticket.first_response_escalation_at : null)
-    ?? ticket.update_escalation_at
-    ?? ticket.close_escalation_at;
-  return value ? new Date(value) : null;
+  const value = ticket.escalation_at ?? (!firstResponseSatisfied ? ticket.first_response_escalation_at : null);
+  if (value) return new Date(value);
+  const fallbacks = [ticket.update_escalation_at, ticket.close_escalation_at].filter((deadline): deadline is string => deadline != null);
+  return fallbacks.length ? new Date(Math.min(...fallbacks.map((deadline) => new Date(deadline).getTime()))) : null;
 }
 
 export function slaStatus(ticket: SlaStatusFields, now: Date): SlaStatus {
   const deadline = slaDeadline(ticket);
-  if (!deadline) return "no_sla";
   if (ticket.first_response_breached || ticket.close_breached || ticket.sla_status === "breached") return "breached";
+  if (!deadline) return "no_sla";
   if (ticket.state === "closed" || ticket.state === "merged") {
     const closedAt = ticket.close_at ?? ticket.closed_at;
     return closedAt && new Date(closedAt) <= deadline ? "closed_on_time" : "breached";

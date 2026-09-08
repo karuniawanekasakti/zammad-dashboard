@@ -136,7 +136,7 @@ def _map_ticket(t: dict) -> TicketOut:
         number=str(t.get("number") or ""),
         title=t.get("title") or "",
         state=_map_state(t.get("state") or "open"),
-        priority=_map_priority(t.get("priority") or "normal"),
+        priority=_map_priority(t.get("priority")),
         priority_id=str(t.get("priority_id") or ""),
         state_id=str(t.get("state_id") or ""),
         severity=severity,
@@ -346,15 +346,16 @@ def _sla_deadline(ticket: TicketOut) -> datetime | None:
     first_response_satisfied = bool(ticket.first_response_at or (ticket.first_response_diff_in_min is not None and ticket.first_response_diff_in_min >= 0))
     if not first_response_satisfied and ticket.first_response_escalation_at:
         return _as_utc(ticket.first_response_escalation_at)
-    return _as_utc(ticket.update_escalation_at or ticket.close_escalation_at)
+    fallbacks = [_as_utc(value) for value in (ticket.update_escalation_at, ticket.close_escalation_at) if value]
+    return min(fallbacks) if fallbacks else None
 
 
 def _effective_sla_status(ticket: TicketOut, now: datetime) -> str:
     deadline = _sla_deadline(ticket)
-    if not deadline:
-        return "no_sla"
     if ticket.first_response_breached or ticket.close_breached or ticket.sla_status == "breached":
         return "breached"
+    if not deadline:
+        return "no_sla"
     closed_at = _as_utc(ticket.close_at or ticket.closed_at)
     if ticket.state in ("closed", "merged"):
         return "closed_on_time" if closed_at and closed_at <= deadline else "breached"
@@ -455,7 +456,7 @@ def _build_sla_monitor(tickets: list[TicketOut], now: datetime | None = None, gr
     for i in range(7):
         start = today - timedelta(days=6 - i)
         end = start + timedelta(days=1)
-        day_closed = [t for t in closed if _sla_deadline(t) and (closed_at := _as_utc(t.close_at or t.closed_at)) and start <= closed_at < end]
+        day_closed = [t for t in closed if (_sla_deadline(t) or _effective_sla_status(t, now) == "breached") and (closed_at := _as_utc(t.close_at or t.closed_at)) and start <= closed_at < end]
         breach_count = len([t for t in day_closed if _effective_sla_status(t, now) == "breached"])
         trend.append({"date": start.date().isoformat(), "day": day_labels[start.weekday() + 1 if start.weekday() < 6 else 0], "rate": ((len(day_closed) - breach_count) / len(day_closed) * 100) if day_closed else 0, "total": len(day_closed), "breach": breach_count})
 
@@ -468,7 +469,7 @@ def _build_sla_monitor(tickets: list[TicketOut], now: datetime | None = None, gr
             grid[dt.weekday()][dt.hour] += 1
 
     rows.sort(key=lambda t: (_status_rank(t["live_sla_status"]), t["sla_remaining_ms"] if t["sla_remaining_ms"] is not None else 10**15))
-    breach_log = [t for t in closed if _sla_deadline(t) and _effective_sla_status(t, now) == "breached"]
+    breach_log = [t for t in closed if _effective_sla_status(t, now) == "breached"]
     breach_log.sort(key=lambda t: _as_utc(t.close_at or t.closed_at) or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
 
     return {
@@ -579,9 +580,8 @@ async def sla_monitor(
     if priority and priority != "all":
         tickets = [ticket for ticket in tickets if ticket.priority == priority]
     visible_ids = {t.group_id for t in tickets}
-    groups = sorted((g.id, g.name or "Unknown") for g in await list_group_rows(db) if g.id in visible_ids)
-    if "" in visible_ids:
-        groups.append(("unknown", "Unknown"))
+    group_names = {g.id: g.name or "Unknown" for g in await list_group_rows(db)}
+    groups = sorted((group_id or "unknown", group_names.get(group_id, "Unknown")) for group_id in visible_ids)
     return ApiResponse(data=_build_sla_monitor(tickets, groups=groups))
 
 

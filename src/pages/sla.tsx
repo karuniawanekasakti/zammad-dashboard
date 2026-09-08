@@ -47,7 +47,7 @@ export default function SlaPage() {
 
   const scope = useScope();
   const config = useQuery({ queryKey: ["system", "public-config"], queryFn: () => api.getPublicConfig() });
-  const groups = useQuery({ queryKey: ["groups", "filter"], queryFn: () => api.listAllGroupsForFilter() });
+  const groups = useQuery({ queryKey: ["groups", "filter", scope], queryFn: () => api.listAllGroupsForFilter() });
   const monitor = useQuery({ queryKey: ["sla", "monitor", scope, groupFilter, priorityFilter], queryFn: () => api.listSlaMonitor(scope, groupFilter, priorityFilter), refetchInterval: 60_000 });
 
   const data = monitor.data;
@@ -125,7 +125,7 @@ export default function SlaPage() {
             <CardDescription>Compliance rate tiket aktif berdasarkan group terpilih.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            {data.sla_rows.some((row) => row.total > 0) ? data.sla_rows.filter((row) => row.total > 0).slice(0, 4).map((row) => <ComplianceRow key={row.name} row={row} />) : <div className="py-8 text-center text-sm text-muted-foreground">Tidak ada tiket ber-SLA.</div>}
+            {data.sla_rows.length ? data.sla_rows.map((row) => <ComplianceRow key={row.id} row={row} />) : <div className="py-8 text-center text-sm text-muted-foreground">Tidak ada tiket dalam scope ini.</div>}
           </CardContent>
         </Card>
       </div>
@@ -197,7 +197,7 @@ export default function SlaPage() {
         <CardHeader className="sm:flex-row sm:items-end sm:justify-between">
           <div>
             <CardTitle className="text-base">Breach Log</CardTitle>
-            <CardDescription>Riwayat tiket closed yang melewati solution SLA.</CardDescription>
+            <CardDescription>Riwayat tiket terminal dengan bukti pelanggaran SLA.</CardDescription>
           </div>
           {data.breach_log.length > 20 && <Button variant="outline" size="sm" onClick={() => setShowAllBreaches((v) => !v)}>{showAllBreaches ? "Tampilkan 20" : "Lihat semua"}</Button>}
         </CardHeader>
@@ -211,7 +211,7 @@ export default function SlaPage() {
                   <TableHead>Priority</TableHead>
                   <TableHead>Group</TableHead>
                   <TableHead>Agent</TableHead>
-                  <TableHead>Waktu Breach</TableHead>
+                  <TableHead>Bukti Breach</TableHead>
                   <TableHead>Diselesaikan pada</TableHead>
                 </TableRow>
               </TableHeader>
@@ -273,10 +273,17 @@ function BreachLogRow({ ticket, zammadBase }: { ticket: Ticket; zammadBase: stri
       <TableCell><PriorityBadge priority={ticket.priority} /></TableCell>
       <TableCell className="text-sm">{ticket.group_name}</TableCell>
       <TableCell className="text-sm">{ticket.owner_name ?? "-"}</TableCell>
-      <TableCell className="text-sm font-medium text-red-600 dark:text-red-400">lewat {formatMinutes(Math.abs(ticket.close_diff_in_min ?? 0))}</TableCell>
+      <TableCell className="text-sm font-medium text-red-600 dark:text-red-400">{breachEvidence(ticket)}</TableCell>
       <TableCell className="text-sm">{formatDate(ticket.close_at ?? ticket.closed_at)}</TableCell>
     </TableRow>
   );
+}
+
+function breachEvidence(ticket: Ticket) {
+  if (ticket.close_diff_in_min != null && ticket.close_diff_in_min < 0) return `Resolusi lewat ${formatMinutes(Math.abs(ticket.close_diff_in_min))}`;
+  if (ticket.close_breached) return "Resolusi melanggar SLA";
+  if (ticket.first_response_breached) return "Respons pertama melanggar SLA";
+  return "Pelanggaran SLA tersimpan";
 }
 
 function EmptyRow({ colSpan, text }: { colSpan: number; text: string }) {

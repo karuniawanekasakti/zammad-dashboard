@@ -41,7 +41,7 @@ def ticket(id_: int, group_id: str, owner_id: str) -> TicketOut:
 
 
 async def main() -> None:
-    rows = [ticket(1, "g1", "a1"), ticket(2, "g1", "a2"), ticket(3, "g2", "a3")]
+    rows = [ticket(1, "g1", "a1"), ticket(2, "g1", "a2"), ticket(3, "g2", "a3"), ticket(4, "g-missing", "a4")]
 
     async def fake_list_ticket_rows(_db):
         return rows
@@ -61,7 +61,7 @@ async def main() -> None:
     }
 
     expected_all = {
-        "admin": {"1", "2", "3"},
+        "admin": {"1", "2", "3", "4"},
         "team_lead": {"1", "2"},
         "project_manager": {"1", "2"},
         "agent": {"1"},
@@ -70,6 +70,9 @@ async def main() -> None:
         for group_id in (None, "all"):
             response = await tickets.sla_monitor(current=current, db=object(), group_id=group_id, priority=None)
             assert {row["id"] for row in response.data["tickets"]} == expected_all[role]
+
+    admin = await tickets.sla_monitor(current=roles["admin"], db=object(), group_id="all", priority=None)
+    assert next(row for row in admin.data["sla_rows"] if row["id"] == "g-missing")["name"] == "Unknown"
 
     for role in ("team_lead", "project_manager"):
         allowed = await tickets.sla_monitor(current=roles[role], db=object(), group_id="g1", priority=None)

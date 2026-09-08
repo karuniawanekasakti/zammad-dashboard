@@ -64,11 +64,11 @@ def main() -> None:
     data = _build_sla_monitor(rows, now)
     assert data["summary"]["total_active"] == 127
     assert data["summary"]["on_track"] == 122
-    assert data["summary"]["breached"] == 1
+    assert data["summary"]["breached"] == 2
     assert data["summary"]["at_risk"] == 2
-    assert data["summary"]["no_sla"] == 2
-    assert data["summary"]["sla_total"] == 125
-    assert [row["id"] for row in data["risk_rows"][:3]] == ["205", "202", "203"]
+    assert data["summary"]["no_sla"] == 1
+    assert data["summary"]["sla_total"] == 126
+    assert [row["id"] for row in data["risk_rows"][:4]] == ["205", "201", "202", "203"]
 
     all_group_data = _build_sla_monitor(rows, now, groups=[("g1", "Support"), ("g2", "Support"), ("g3", "Empty")])
     assert [(row["id"], row["name"]) for row in all_group_data["sla_rows"]] == [("g1", "Support"), ("g2", "Support"), ("g3", "Empty")]
@@ -120,6 +120,7 @@ def main() -> None:
     assert unsatisfied_response["live_sla_status"] == "warning"
 
     update_deadline = now + timedelta(hours=3)
+    resolution_deadline = now + timedelta(hours=2)
     completed_response = _build_sla_monitor([
         ticket(
             302,
@@ -127,11 +128,11 @@ def main() -> None:
             first_response_at=now - timedelta(hours=1),
             first_response_escalation_at=now - timedelta(hours=2),
             update_escalation_at=update_deadline,
-            close_escalation_at=now + timedelta(hours=5),
-            zammad_created_at=now - timedelta(hours=3),
+            close_escalation_at=resolution_deadline,
+            zammad_created_at=now - timedelta(hours=2),
         )
     ], now)["tickets"][0]
-    assert completed_response["actionable_deadline"] == update_deadline.isoformat()
+    assert completed_response["actionable_deadline"] == resolution_deadline.isoformat()
     assert completed_response["sla_progress"] == 50
 
     positive_diff_response = _build_sla_monitor([
@@ -151,10 +152,11 @@ def main() -> None:
         {"close_breached": True},
         {"sla_status": "breached"},
     ), start=304):
-        preserved_breach = _build_sla_monitor([
-            ticket(id_, escalation_at=now + timedelta(hours=4), **evidence)
-        ], now)["tickets"][0]
-        assert preserved_breach["live_sla_status"] == "breached"
+        for deadline in (now + timedelta(hours=4), None):
+            preserved_breach = _build_sla_monitor([
+                ticket(id_, escalation_at=deadline, **evidence)
+            ], now)["tickets"][0]
+            assert preserved_breach["live_sla_status"] == "breached"
 
     boundary_rows = _build_sla_monitor([
         ticket(307, escalation_at=now + timedelta(minutes=30)),
@@ -192,16 +194,16 @@ def main() -> None:
         ticket(401, state="closed", closed_at=closed_at, close_at=closed_at, escalation_at=closed_at - timedelta(hours=1)),
         ticket(402, state="merged", closed_at=closed_at, close_at=closed_at, escalation_at=closed_at + timedelta(hours=1), close_breached=True),
         ticket(403, state="merged", closed_at=closed_at, close_at=closed_at, escalation_at=None),
+        ticket(404, state="closed", closed_at=closed_at, close_at=closed_at, escalation_at=None, first_response_breached=True),
     ], now)
     today = next(point for point in history["trend"] if point["date"] == closed_at.date().isoformat())
     assert history["summary"]["total_active"] == 0
-    assert today["total"] == 3
-    assert today["breach"] == 2
-    assert round(today["rate"], 6) == round(100 / 3, 6)
-    assert {row["id"] for row in history["breach_log"]} == {"401", "402"}
+    assert today["total"] == 4
+    assert today["breach"] == 3
+    assert today["rate"] == 25
+    assert {row["id"] for row in history["breach_log"]} == {"401", "402", "404"}
 
-
-print("SLA monitor OK")
+    print("SLA monitor OK")
 
 
 if __name__ == "__main__":

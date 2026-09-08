@@ -94,4 +94,8 @@ monitor_row = _build_sla_monitor([mapped], now)["tickets"][0]
 assert mapped.first_response_breached is False
 assert monitor_row["live_sla_status"] == "on_track"
 assert monitor_row["actionable_deadline"] == future_escalation.isoformat()
+
+missing_priority = _map_ticket({**raw, "id": 129, "priority": None})
+assert missing_priority.priority == "unknown"
+
 print("SLA mapper OK")

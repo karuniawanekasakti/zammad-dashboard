@@ -201,5 +201,8 @@ def main() -> None:
     assert {row["id"] for row in history["breach_log"]} == {"401", "402"}
 
 
+print("SLA monitor OK")
+
+
 if __name__ == "__main__":
     main()

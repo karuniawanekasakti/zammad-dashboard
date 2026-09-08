@@ -7,9 +7,7 @@ Usage:
 import asyncio
 import sys
 
-from sqlalchemy import func, select
 from sqlalchemy.engine import make_url
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.config import settings
 from app.db_models import GroupRow, TicketRow, UserRow
@@ -30,6 +28,9 @@ async def main():
     print(f"[check_sync] Sync result: {result}")
 
     # Verify counts by querying the DB directly
+    from sqlalchemy import func, select
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
     engine = create_async_engine(settings.database_url, pool_pre_ping=True)
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
 
@@ -57,7 +58,7 @@ async def main():
     if zero_ticket_groups:
         labels = ", ".join(f"{group_id} ({name or 'Unknown'})" for group_id, name in zero_ticket_groups)
         print(f"[check_sync] Zero-ticket groups: {labels}")
-    if len(coverage) > 1 and len([count for _, _, count in coverage if count > 0]) == 1:
+    if len([count for _, _, count in coverage if count > 0]) == 1:
         print("[check_sync] WARNING: Synchronized tickets represent only one group. This may indicate API-token scope restrictions; it does not prove unseen upstream records exist.")
 
     print("[check_sync] OK: All tables have rows")

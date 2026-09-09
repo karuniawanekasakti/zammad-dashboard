@@ -125,7 +125,8 @@ def _map_ticket(t: dict) -> TicketOut:
         close_at and close_deadline and close_at > close_deadline
         or not close_at and close_deadline and close_deadline < now
     )
-    sla_status = "breached" if (remaining is not None and remaining < 0) or close_breached else _sla_bucket(remaining)
+    update_diff = _int_or_none(t.get("update_diff_in_min"))
+    sla_status = "breached" if (remaining is not None and remaining < 0) or first_response_breached or close_breached or (update_diff is not None and update_diff < 0) else _sla_bucket(remaining)
 
     severity = _custom_field_value(t.get("priority_case"))
     ticket_category = _custom_field_value(t.get("ticket_category"))
@@ -160,7 +161,7 @@ def _map_ticket(t: dict) -> TicketOut:
         close_in_min=_int_or_none(t.get("close_in_min")),
         close_diff_in_min=close_diff,
         update_escalation_at=update_deadline,
-        update_diff_in_min=_int_or_none(t.get("update_diff_in_min")),
+        update_diff_in_min=update_diff,
         first_response_remaining_secs=remaining,
         first_response_breached=first_response_breached,
         close_breached=close_breached,
@@ -350,10 +351,17 @@ def _sla_deadline(ticket: TicketOut) -> datetime | None:
     return min(fallbacks) if fallbacks else None
 
 
+def _sla_outcome_diffs(ticket: TicketOut) -> tuple[int, ...]:
+    return tuple(value for value in (ticket.first_response_diff_in_min, ticket.update_diff_in_min, ticket.close_diff_in_min) if value is not None)
+
+
 def _effective_sla_status(ticket: TicketOut, now: datetime) -> str:
     deadline = _sla_deadline(ticket)
-    if ticket.first_response_breached or ticket.close_breached or ticket.sla_status == "breached":
+    outcome_diffs = _sla_outcome_diffs(ticket)
+    if ticket.first_response_breached or ticket.close_breached or ticket.sla_status == "breached" or any(value < 0 for value in outcome_diffs):
         return "breached"
+    if ticket.state in ("closed", "merged") and outcome_diffs:
+        return "closed_on_time"
     if not deadline:
         return "no_sla"
     closed_at = _as_utc(ticket.close_at or ticket.closed_at)
@@ -456,7 +464,7 @@ def _build_sla_monitor(tickets: list[TicketOut], now: datetime | None = None, gr
     for i in range(7):
         start = today - timedelta(days=6 - i)
         end = start + timedelta(days=1)
-        day_closed = [t for t in closed if (_sla_deadline(t) or _effective_sla_status(t, now) == "breached") and (closed_at := _as_utc(t.close_at or t.closed_at)) and start <= closed_at < end]
+        day_closed = [t for t in closed if (_sla_outcome_diffs(t) or _sla_deadline(t) or _effective_sla_status(t, now) == "breached") and (closed_at := _as_utc(t.close_at or t.closed_at)) and start <= closed_at < end]
         breach_count = len([t for t in day_closed if _effective_sla_status(t, now) == "breached"])
         trend.append({"date": start.date().isoformat(), "day": day_labels[start.weekday() + 1 if start.weekday() < 6 else 0], "rate": ((len(day_closed) - breach_count) / len(day_closed) * 100) if day_closed else 0, "total": len(day_closed), "breach": breach_count})
 

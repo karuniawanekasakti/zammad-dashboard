@@ -60,6 +60,7 @@ const ticket = (deadline: string | null, overrides = {}) => ({
   first_response_escalation_at: null,
   first_response_diff_in_min: null,
   update_escalation_at: null,
+  update_diff_in_min: null,
   close_escalation_at: null,
   state: "open" as const,
   close_at: null,
@@ -77,6 +78,8 @@ assert.equal(slaStatus(ticket("2026-09-08T10:00:00.000Z"), now), "warning");
 assert.equal(slaStatus(ticket("2026-09-08T10:00:01.000Z"), now), "on_track");
 assert.equal(slaStatus(ticket("2026-09-08T12:00:00.000Z", { first_response_breached: true }), now), "breached");
 assert.equal(slaStatus(ticket(null, { first_response_breached: true }), now), "breached");
+assert.equal(slaStatus(ticket(null, { state: "closed", close_at: current, first_response_diff_in_min: 5, close_diff_in_min: 10 }), now), "closed_on_time");
+assert.equal(slaStatus(ticket(null, { state: "closed", close_at: current, first_response_diff_in_min: 5, update_diff_in_min: -1, close_diff_in_min: 10 }), now), "breached");
 assert.equal(slaStatus(ticket(null), now), "no_sla");
 assert.equal(slaRemainingMs(ticket("2026-09-08T12:00:00.000Z"), now), 4 * 60 * 60 * 1000);
 assert.equal(slaProgress(ticket("2026-09-08T12:00:00.000Z"), now), 50);
@@ -122,12 +125,14 @@ const mock = buildMockSlaMonitor([
   mockTicket("1", { escalation_at: current, state: "open" }),
   mockTicket("2", { state: "closed", state_id: "4", close_at: historicalClose, closed_at: historicalClose, first_response_breached: true }),
   mockTicket("3", { state: "merged", state_id: "5", close_at: historicalClose, closed_at: historicalClose }),
+  mockTicket("4", { state: "closed", state_id: "4", close_at: historicalClose, closed_at: historicalClose, first_response_diff_in_min: 5, close_diff_in_min: 10 }),
+  mockTicket("5", { state: "closed", state_id: "4", close_at: historicalClose, closed_at: historicalClose, first_response_diff_in_min: 5, update_diff_in_min: -1, close_diff_in_min: 10 }),
 ], now);
 assert.equal(mock.summary.total_active, 1);
 assert.equal(mock.by_group["g-missing"].total, 1);
 assert.equal(mock.by_priority.unknown.total, 1);
-assert.equal(mock.trend.find((point) => point.date === "2026-09-08")?.total, 1);
-assert.deepEqual(mock.breach_log.map((row) => row.id), ["2"]);
+assert.equal(mock.trend.find((point) => point.date === "2026-09-08")?.total, 3);
+assert.deepEqual(mock.breach_log.map((row) => row.id), ["2", "5"]);
 await vite.close();
 
 console.log("Mock SLA deadline OK");

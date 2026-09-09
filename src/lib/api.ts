@@ -186,7 +186,7 @@ export function buildMockSlaMonitor(rows: Ticket[], now = new Date()): SlaMonito
     const day = new Date(today.getTime() - (6 - i) * 24 * 60 * 60 * 1000);
     const next = new Date(day.getTime() + 24 * 60 * 60 * 1000);
     const dayRows = closed.filter((t) => {
-      if (!slaDeadline(t) && slaStatus(t, now) !== "breached") return false;
+      if (t.first_response_diff_in_min == null && t.update_diff_in_min == null && t.close_diff_in_min == null && !slaDeadline(t) && slaStatus(t, now) !== "breached") return false;
       const close = new Date(t.close_at ?? t.closed_at ?? 0).getTime();
       return day.getTime() <= close && close < next.getTime();
     });

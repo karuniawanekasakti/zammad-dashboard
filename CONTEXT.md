@@ -48,7 +48,7 @@ The **actionable deadline** is Zammad's current escalation deadline, or otherwis
 
 **Warning** means the deadline is at most two hours away; **Critical** means it is at most 30 minutes away. **At-Risk** is Warning plus Critical. **Breached** means the actionable deadline passed or synchronized breach evidence exists; later milestones do not erase that evidence.
 
-**Current compliance** is `(monitored - breached) / monitored`; Warning and Critical remain compliant until breach, and the rate is undefined when there are no monitored tickets. **Historical compliance** uses only SLA-evidenced terminal (`closed` or `merged`) outcomes in the selected authorized group and priority scope.
+**Current compliance** is `(monitored - breached) / monitored`; Warning and Critical remain compliant until breach, and the rate is undefined when there are no monitored tickets. An **SLA-evidenced terminal outcome** is a terminal (`closed` or `merged`) ticket for which Zammad retained at least one evaluated milestone result: any missed milestone makes the outcome breached, otherwise it is closed on time. **Historical compliance** uses only these outcomes in the selected authorized group and priority scope.
 
 ## Release
 

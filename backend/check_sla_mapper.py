@@ -75,6 +75,17 @@ late_resolution = _map_ticket({
 })
 assert late_resolution.close_breached is True
 
+late_update = _map_ticket({
+    **raw,
+    "id": 130,
+    "escalation_at": None,
+    "close_at": None,
+    "close_escalation_at": "2099-08-12T02:00:00Z",
+    "close_diff_in_min": None,
+    "update_diff_in_min": -1,
+})
+assert late_update.sla_status == "breached"
+
 now = datetime.now(timezone.utc)
 future_escalation = now + timedelta(hours=4)
 mapped = _map_ticket({

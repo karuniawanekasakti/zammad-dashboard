@@ -203,6 +203,17 @@ def main() -> None:
     assert today["rate"] == 25
     assert {row["id"] for row in history["breach_log"]} == {"401", "402", "404"}
 
+    terminal_outcomes = _build_sla_monitor([
+        ticket(405, state="closed", closed_at=closed_at, close_at=closed_at, escalation_at=None, first_response_diff_in_min=5, close_diff_in_min=10),
+        ticket(406, state="closed", closed_at=closed_at, close_at=closed_at, escalation_at=None, first_response_diff_in_min=5, update_diff_in_min=-1, close_diff_in_min=10),
+    ], now)
+    terminal_day = next(point for point in terminal_outcomes["trend"] if point["date"] == closed_at.date().isoformat())
+    assert terminal_day["rate"] == 50
+    assert terminal_day["total"] == 2
+    assert terminal_day["breach"] == 1
+    assert terminal_outcomes["summary"]["total_closed_on_time"] == 1
+    assert [row["id"] for row in terminal_outcomes["breach_log"]] == ["406"]
+
     print("SLA monitor OK")
 
 

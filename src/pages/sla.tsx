@@ -301,6 +301,7 @@ function BreachLogRow({ ticket, zammadBase }: { ticket: Ticket; zammadBase: stri
 
 function breachEvidence(ticket: Ticket) {
   if (ticket.close_diff_in_min != null && ticket.close_diff_in_min < 0) return `Resolusi lewat ${formatMinutes(Math.abs(ticket.close_diff_in_min))}`;
+  if (ticket.update_diff_in_min != null && ticket.update_diff_in_min < 0) return `Update lewat ${formatMinutes(Math.abs(ticket.update_diff_in_min))}`;
   if (ticket.close_breached) return "Resolusi melanggar SLA";
   if (ticket.first_response_breached) return "Respons pertama melanggar SLA";
   return "Pelanggaran SLA tersimpan";

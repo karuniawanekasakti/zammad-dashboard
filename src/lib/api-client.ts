@@ -127,8 +127,8 @@ export const apiClient = {
     return request<Ticket[]>("/tickets/sla-at-risk");
   },
 
-  async listSlaMonitor(_scope: Scope, groupId?: string): Promise<SlaMonitorData> {
-    return request<SlaMonitorData>(`/tickets/sla-monitor${qs({ group_id: groupId })}`);
+  async listSlaMonitor(_scope: Scope, groupId?: string, priority?: Ticket["priority"] | "all"): Promise<SlaMonitorData> {
+    return request<SlaMonitorData>(`/tickets/sla-monitor${qs({ group_id: groupId, priority })}`);
   },
 
   async searchTickets(query: string, perPage = 100): Promise<Ticket[]> {

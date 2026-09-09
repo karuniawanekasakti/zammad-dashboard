@@ -1,3 +1,4 @@
+import { slaDeadline, slaProgress, slaRemainingMs, slaStatus } from "@/lib/sla-deadline";
 import {
   agentStats,
   alertRules,
@@ -149,41 +150,9 @@ function applyTicketSorts(rows: Ticket[], sorts?: string, sortBy?: string, sortD
 
 type LiveSlaStatus = SlaMonitorData["tickets"][number]["live_sla_status"];
 
-function slaDeadline(ticket: Ticket): Date | null {
-  const values = [ticket.escalation_at, ticket.first_response_escalation_at, ticket.update_escalation_at, ticket.close_escalation_at].filter(Boolean) as string[];
-  return values.length ? new Date(Math.min(...values.map((v) => new Date(v).getTime()))) : null;
-}
-
-function slaStatus(ticket: Ticket, now: Date): LiveSlaStatus {
-  const deadline = slaDeadline(ticket);
-  if (!deadline) return "no_sla";
-  if (ticket.state === "closed" || ticket.state === "merged") {
-    const closedAt = ticket.close_at ?? ticket.closed_at;
-    return closedAt && new Date(closedAt) <= deadline ? "closed_on_time" : "breached";
-  }
-  if (ticket.first_response_breached || ticket.close_breached || ticket.sla_status === "breached" || now > deadline) return "breached";
-  const remaining = (deadline.getTime() - now.getTime()) / 1000;
-  if (remaining <= 30 * 60) return "critical";
-  if (remaining <= 2 * 60 * 60) return "warning";
-  return "on_track";
-}
-
-function slaRemainingMs(ticket: Ticket, now: Date): number | null {
-  const deadline = slaDeadline(ticket);
-  return deadline ? deadline.getTime() - now.getTime() : null;
-}
-
-function slaProgress(ticket: Ticket, now: Date): number {
-  const deadline = slaDeadline(ticket);
-  if (!deadline) return 0;
-  const start = new Date(ticket.zammad_created_at).getTime();
-  const end = deadline.getTime();
-  return end <= start ? 0 : Math.max(0, Math.min(100, Math.round(((now.getTime() - start) / (end - start)) * 100)));
-}
-
-function slaCounts(rows: SlaMonitorData["tickets"]): Omit<SlaMonitorData["priority_rows"][number], "name"> {
+function slaCounts(rows: SlaMonitorData["tickets"]): Omit<SlaMonitorData["priority_rows"][number], "id" | "name"> {
   const withSla = rows.filter((t) => t.live_sla_status !== "no_sla");
-  const ok = withSla.filter((t) => t.live_sla_status === "on_track" || t.live_sla_status === "closed_on_time").length;
+  const breached = withSla.filter((t) => t.live_sla_status === "breached").length;
   return {
     total: rows.length,
     total_with_sla: withSla.length,
@@ -191,41 +160,38 @@ function slaCounts(rows: SlaMonitorData["tickets"]): Omit<SlaMonitorData["priori
     warning: rows.filter((t) => t.live_sla_status === "warning").length,
     critical: rows.filter((t) => t.live_sla_status === "critical").length,
     at_risk: rows.filter((t) => t.live_sla_status === "warning" || t.live_sla_status === "critical").length,
-    breached: rows.filter((t) => t.live_sla_status === "breached").length,
+    breached,
     no_sla: rows.filter((t) => t.live_sla_status === "no_sla").length,
-    compliance_rate: withSla.length ? (ok / withSla.length) * 100 : null,
+    compliance_rate: withSla.length ? ((withSla.length - breached) / withSla.length) * 100 : null,
   };
 }
 
-function slaMonitorRow(name: string, rows: SlaMonitorData["tickets"]): SlaMonitorData["priority_rows"][number] {
-  return { name, ...slaCounts(rows) };
+function slaMonitorRow(id: string, name: string, rows: SlaMonitorData["tickets"]): SlaMonitorData["priority_rows"][number] {
+  return { id, name, ...slaCounts(rows) };
 }
 
-function buildMockSlaMonitor(rows: Ticket[]): SlaMonitorData {
-  const now = new Date();
+export function buildMockSlaMonitor(rows: Ticket[], now = new Date()): SlaMonitorData {
   const active = rows.filter((t) => t.state === "new" || t.state === "open" || t.state === "pending");
-  const closed = rows.filter((t) => t.state === "closed");
-  const enriched = active.map((t) => ({ ...t, live_sla_status: slaStatus(t, now), sla_remaining_ms: slaRemainingMs(t, now), sla_progress: slaProgress(t, now) }));
-  const closedEnriched = closed.map((t) => ({ ...t, live_sla_status: slaStatus(t, now), sla_remaining_ms: slaRemainingMs(t, now), sla_progress: slaProgress(t, now) }));
+  const closed = rows.filter((t) => t.state === "closed" || t.state === "merged");
+  const enriched = active.map((t) => ({ ...t, actionable_deadline: slaDeadline(t)?.toISOString() ?? null, live_sla_status: slaStatus(t, now), sla_remaining_ms: slaRemainingMs(t, now), sla_progress: slaProgress(t, now) }));
+  const closedEnriched = closed.map((t) => ({ ...t, actionable_deadline: slaDeadline(t)?.toISOString() ?? null, live_sla_status: slaStatus(t, now), sla_remaining_ms: slaRemainingMs(t, now), sla_progress: slaProgress(t, now) }));
   const grid = Array.from({ length: 7 }, () => Array(24).fill(0));
   enriched.filter((t) => t.live_sla_status === "breached").forEach((t) => {
     const d = slaDeadline(t) ?? new Date(t.zammad_updated_at);
-    grid[(d.getDay() + 6) % 7][d.getHours()] += 1;
+    grid[(d.getUTCDay() + 6) % 7][d.getUTCHours()] += 1;
   });
   const dayLabels = ["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"];
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
   const trend = Array.from({ length: 7 }, (_, i) => {
-    const day = new Date(today);
-    day.setDate(today.getDate() - (6 - i));
-    const next = new Date(day);
-    next.setDate(day.getDate() + 1);
+    const day = new Date(today.getTime() - (6 - i) * 24 * 60 * 60 * 1000);
+    const next = new Date(day.getTime() + 24 * 60 * 60 * 1000);
     const dayRows = closed.filter((t) => {
+      if (!slaDeadline(t) && slaStatus(t, now) !== "breached") return false;
       const close = new Date(t.close_at ?? t.closed_at ?? 0).getTime();
       return day.getTime() <= close && close < next.getTime();
     });
     const breach = dayRows.filter((t) => slaStatus(t, now) === "breached").length;
-    return { date: day.toISOString().slice(0, 10), day: dayLabels[day.getDay()], rate: dayRows.length ? ((dayRows.length - breach) / dayRows.length) * 100 : 0, total: dayRows.length, breach };
+    return { date: day.toISOString().slice(0, 10), day: dayLabels[day.getUTCDay()], rate: dayRows.length ? ((dayRows.length - breach) / dayRows.length) * 100 : 0, total: dayRows.length, breach };
   });
   const rank: Record<LiveSlaStatus, number> = { breached: 0, critical: 1, warning: 2, on_track: 3, safe: 3, no_sla: 4, closed_on_time: 5 };
   enriched.sort((a, b) => rank[a.live_sla_status] - rank[b.live_sla_status] || (a.sla_remaining_ms ?? Infinity) - (b.sla_remaining_ms ?? Infinity));
@@ -233,20 +199,21 @@ function buildMockSlaMonitor(rows: Ticket[]): SlaMonitorData {
   const avgCloseRows = closed.filter((t) => t.close_at || t.closed_at).map((t) => t.close_in_min).filter((n): n is number => n != null);
   const summary = {
     ...slaCounts(enriched),
-    compliance_rate: slaCounts(enriched).compliance_rate ?? 0,
     total_active: active.length,
     sla_total: slaCounts(enriched).total_with_sla,
     total_closed_on_time: closedEnriched.filter((t) => t.live_sla_status === "closed_on_time").length,
     avg_resolution_minutes: avgCloseRows.length ? Math.round(avgCloseRows.reduce((sum, n) => sum + n, 0) / avgCloseRows.length) : null,
     avg_resolution_mins: avgCloseRows.length ? Math.round(avgCloseRows.reduce((sum, n) => sum + n, 0) / avgCloseRows.length) : null,
   };
-  const priority_rows = (["very high", "high", "normal", "low"] as TicketPriority[]).map((p) => slaMonitorRow(p === "very high" ? "Urgent" : p === "normal" ? "Medium" : p, enriched.filter((t) => t.priority === p)));
-  const sla_rows = [...new Set(enriched.map((t) => t.group_name).filter(Boolean))].sort().map((name) => slaMonitorRow(name, enriched.filter((t) => t.group_name === name)));
+  const priorityLabels: Record<TicketPriority, string> = { "very high": "Urgent", high: "High", normal: "Medium", low: "Low", unknown: "Unknown" };
+  const priority_rows = (Object.entries(priorityLabels) as [TicketPriority, string][]).map(([priority, label]) => slaMonitorRow(priority, label, enriched.filter((t) => t.priority === priority)));
+  const groups = new Map(enriched.map((t) => [t.group_id || "unknown", t.group_name || "Unknown"]));
+  const sla_rows = [...groups].sort((a, b) => a[0].localeCompare(b[0])).map(([id, name]) => slaMonitorRow(id, name, enriched.filter((t) => (t.group_id || "unknown") === id)));
   return {
     ...summary,
     summary,
-    by_priority: Object.fromEntries(priority_rows.map((row) => [row.name, row])),
-    by_group: Object.fromEntries(sla_rows.map((row) => [row.name, row])),
+    by_priority: Object.fromEntries(priority_rows.map((row) => [row.id, row])),
+    by_group: Object.fromEntries(sla_rows.map((row) => [row.id, row])),
     priority_rows,
     sla_rows,
     trend,
@@ -377,9 +344,10 @@ const mockApi = {
     );
   },
 
-  async listSlaMonitor(scope: Scope, groupId?: string): Promise<SlaMonitorData> {
+  async listSlaMonitor(scope: Scope, groupId?: string, priority?: TicketPriority | "all"): Promise<SlaMonitorData> {
     let rows = applyScope(tickets, scope);
     if (groupId && groupId !== "all") rows = rows.filter((t) => t.group_id === groupId);
+    if (priority && priority !== "all") rows = rows.filter((t) => t.priority === priority);
     return delay(buildMockSlaMonitor(rows));
   },
 

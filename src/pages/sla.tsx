@@ -18,7 +18,7 @@ import { cn, formatNumber, formatPercent } from "@/lib/utils";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { SlaMonitorData, SlaMonitorRow, SlaMonitorTicket, SlaStatus, Ticket } from "@/types";
 
-type TabValue = "all" | "on_track" | "warning" | "critical" | "breached";
+type TabValue = "all" | "on_track" | "warning" | "critical" | "breached" | "no_sla";
 
 const FALLBACK_ZAMMAD_BASE = (import.meta.env.VITE_ZAMMAD_BASE_URL ?? "").replace(/\/$/, "");
 
@@ -28,7 +28,7 @@ const STATUS_META: Record<SlaStatus, { label: string; bar: string; text: string;
   warning: { label: "Warning", bar: "bg-amber-500", text: "text-amber-600 dark:text-amber-400", icon: "bg-amber-500" },
   critical: { label: "Critical", bar: "bg-orange-500", text: "text-orange-600 dark:text-orange-400", icon: "bg-orange-500" },
   breached: { label: "Breached", bar: "bg-red-600", text: "text-red-600 dark:text-red-400", icon: "bg-red-600" },
-  no_sla: { label: "No SLA", bar: "bg-muted-foreground", text: "text-muted-foreground", icon: "bg-muted-foreground" },
+  no_sla: { label: "Unmonitored", bar: "bg-muted-foreground", text: "text-muted-foreground", icon: "bg-muted-foreground" },
   closed_on_time: { label: "Closed on time", bar: "bg-emerald-500", text: "text-emerald-600 dark:text-emerald-400", icon: "bg-emerald-500" },
 };
 
@@ -41,13 +41,14 @@ const CHART_COLORS = {
 
 export default function SlaPage() {
   const [groupFilter, setGroupFilter] = useState<string>("all");
+  const [priorityFilter, setPriorityFilter] = useState<Ticket["priority"] | "all">("all");
   const [statusTab, setStatusTab] = useState<TabValue>("all");
   const [showAllBreaches, setShowAllBreaches] = useState(false);
 
   const scope = useScope();
   const config = useQuery({ queryKey: ["system", "public-config"], queryFn: () => api.getPublicConfig() });
-  const groups = useQuery({ queryKey: ["groups", "filter"], queryFn: () => api.listAllGroupsForFilter() });
-  const monitor = useQuery({ queryKey: ["sla", "monitor", scope, groupFilter], queryFn: () => api.listSlaMonitor(scope, groupFilter) });
+  const groups = useQuery({ queryKey: ["groups", "filter", scope], queryFn: () => api.listAllGroupsForFilter() });
+  const monitor = useQuery({ queryKey: ["sla", "monitor", scope, groupFilter, priorityFilter], queryFn: () => api.listSlaMonitor(scope, groupFilter, priorityFilter), refetchInterval: 60_000 });
 
   const data = monitor.data;
   const tableRows = useMemo(() => {
@@ -85,14 +86,26 @@ export default function SlaPage() {
               {(groups.data ?? []).map((g) => <SelectItem key={g.id} value={g.id}>{g.name}</SelectItem>)}
             </SelectContent>
           </Select>
+          <span className="text-sm font-medium">Priority</span>
+          <Select value={priorityFilter} onValueChange={(value) => setPriorityFilter(value as Ticket["priority"] | "all")}>
+            <SelectTrigger className="w-[180px]"><SelectValue placeholder="All priorities" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All priorities</SelectItem>
+              <SelectItem value="very high">Urgent</SelectItem>
+              <SelectItem value="high">High</SelectItem>
+              <SelectItem value="normal">Medium</SelectItem>
+              <SelectItem value="low">Low</SelectItem>
+              <SelectItem value="unknown">Unknown</SelectItem>
+            </SelectContent>
+          </Select>
           {groups.isError && <span className="text-sm text-amber-600 dark:text-amber-400">Daftar group gagal dimuat.</span>}
         </CardContent>
       </Card>
 
       <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
-        <KpiCard title="Compliance Rate" value={formatPercent(data.summary.compliance_rate, 0)} helper={`${formatNumber(data.summary.on_track)} of ${formatNumber(data.summary.total_with_sla)} tiket met SLA`} icon={CheckCircle2} iconClassName={complianceIcon(data.summary.compliance_rate)} />
+        <KpiCard title="Compliance Rate" value={data.summary.compliance_rate == null ? "-" : formatPercent(data.summary.compliance_rate, 0)} helper={`${formatNumber(data.summary.total_with_sla - data.summary.breached)} of ${formatNumber(data.summary.total_with_sla)} tiket met SLA`} icon={CheckCircle2} iconClassName={complianceIcon(data.summary.compliance_rate)} />
         <KpiCard title="On Track" value={formatNumber(data.summary.on_track)} helper="within SLA deadline" icon={CheckCircle2} iconClassName="bg-emerald-500/15 text-emerald-600" />
-        <KpiCard title="At-Risk" value={formatNumber(data.summary.at_risk)} helper="deadline < 30 menit" icon={AlertTriangle} iconClassName="bg-amber-500/15 text-amber-600" />
+        <KpiCard title="At-Risk" value={formatNumber(data.summary.at_risk)} helper="Warning ≤ 2 jam · Critical ≤ 30 menit" icon={AlertTriangle} iconClassName="bg-amber-500/15 text-amber-600" />
         <KpiCard title="Breached" value={formatNumber(data.summary.breached)} helper="SLA deadline passed" icon={Flame} iconClassName="bg-red-500/15 text-red-600" />
       </div>
 
@@ -112,7 +125,7 @@ export default function SlaPage() {
             <CardDescription>Compliance rate tiket aktif berdasarkan group terpilih.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            {data.sla_rows.some((row) => row.total > 0) ? data.sla_rows.filter((row) => row.total > 0).slice(0, 4).map((row) => <ComplianceRow key={row.name} row={row} />) : <div className="py-8 text-center text-sm text-muted-foreground">Tidak ada tiket ber-SLA.</div>}
+            {data.sla_rows.length ? data.sla_rows.map((row) => <ComplianceRow key={row.id} row={row} />) : <div className="py-8 text-center text-sm text-muted-foreground">Tidak ada tiket dalam scope ini.</div>}
           </CardContent>
         </Card>
       </div>
@@ -130,6 +143,7 @@ export default function SlaPage() {
               <TabsTrigger value="warning">Warning</TabsTrigger>
               <TabsTrigger value="critical">Critical</TabsTrigger>
               <TabsTrigger value="breached">Breached</TabsTrigger>
+              <TabsTrigger value="no_sla">Unmonitored</TabsTrigger>
             </TabsList>
           </Tabs>
         </CardHeader>
@@ -183,7 +197,7 @@ export default function SlaPage() {
         <CardHeader className="sm:flex-row sm:items-end sm:justify-between">
           <div>
             <CardTitle className="text-base">Breach Log</CardTitle>
-            <CardDescription>Riwayat tiket closed yang melewati solution SLA.</CardDescription>
+            <CardDescription>Riwayat tiket terminal dengan bukti pelanggaran SLA.</CardDescription>
           </div>
           {data.breach_log.length > 20 && <Button variant="outline" size="sm" onClick={() => setShowAllBreaches((v) => !v)}>{showAllBreaches ? "Tampilkan 20" : "Lihat semua"}</Button>}
         </CardHeader>
@@ -197,7 +211,7 @@ export default function SlaPage() {
                   <TableHead>Priority</TableHead>
                   <TableHead>Group</TableHead>
                   <TableHead>Agent</TableHead>
-                  <TableHead>Waktu Breach</TableHead>
+                  <TableHead>Bukti Breach</TableHead>
                   <TableHead>Diselesaikan pada</TableHead>
                 </TableRow>
               </TableHeader>
@@ -237,7 +251,7 @@ function RiskRow({ ticket }: { ticket: SlaMonitorTicket }) {
       <TableCell><PriorityBadge priority={ticket.priority} /></TableCell>
       <TableCell className="text-sm">{ticket.group_name}</TableCell>
       <TableCell className="text-sm">{ticket.owner_name ?? "-"}</TableCell>
-      <TableCell className="text-sm">{formatDate(ticket.escalation_at ?? ticket.first_response_escalation_at ?? ticket.close_escalation_at)}</TableCell>
+      <TableCell className="text-sm">{formatDate(ticket.actionable_deadline)}</TableCell>
       <TableCell className="min-w-[170px]">
         <div className={cn("mb-1 flex items-center gap-2 text-sm font-medium", meta.text)}>
           <span className={cn("size-2 rounded-full", meta.icon)} />
@@ -259,10 +273,17 @@ function BreachLogRow({ ticket, zammadBase }: { ticket: Ticket; zammadBase: stri
       <TableCell><PriorityBadge priority={ticket.priority} /></TableCell>
       <TableCell className="text-sm">{ticket.group_name}</TableCell>
       <TableCell className="text-sm">{ticket.owner_name ?? "-"}</TableCell>
-      <TableCell className="text-sm font-medium text-red-600 dark:text-red-400">lewat {formatMinutes(Math.abs(ticket.close_diff_in_min ?? 0))}</TableCell>
+      <TableCell className="text-sm font-medium text-red-600 dark:text-red-400">{breachEvidence(ticket)}</TableCell>
       <TableCell className="text-sm">{formatDate(ticket.close_at ?? ticket.closed_at)}</TableCell>
     </TableRow>
   );
+}
+
+function breachEvidence(ticket: Ticket) {
+  if (ticket.close_diff_in_min != null && ticket.close_diff_in_min < 0) return `Resolusi lewat ${formatMinutes(Math.abs(ticket.close_diff_in_min))}`;
+  if (ticket.close_breached) return "Resolusi melanggar SLA";
+  if (ticket.first_response_breached) return "Respons pertama melanggar SLA";
+  return "Pelanggaran SLA tersimpan";
 }
 
 function EmptyRow({ colSpan, text }: { colSpan: number; text: string }) {
@@ -328,6 +349,7 @@ function formatDate(value: string | null) {
   return value ? new Date(value).toLocaleString() : "-";
 }
 
-function complianceIcon(rate: number) {
+function complianceIcon(rate: number | null) {
+  if (rate == null) return "bg-muted text-muted-foreground";
   return rate >= 90 ? "bg-emerald-500/15 text-emerald-600" : rate >= 75 ? "bg-amber-500/15 text-amber-600" : "bg-red-500/15 text-red-600";
 }

@@ -22,7 +22,7 @@ export interface Group {
 }
 
 export type TicketState = "new" | "open" | "pending" | "closed" | "merged";
-export type TicketPriority = "low" | "normal" | "high" | "very high";
+export type TicketPriority = "low" | "normal" | "high" | "very high" | "unknown";
 export type SlaStatus = "safe" | "on_track" | "warning" | "critical" | "breached" | "no_sla" | "closed_on_time";
 
 export interface SlaPolicy {
@@ -80,12 +80,14 @@ export interface Ticket {
 }
 
 export interface SlaMonitorTicket extends Ticket {
+  actionable_deadline: string | null;
   live_sla_status: SlaStatus;
   sla_remaining_ms: number | null;
   sla_progress: number;
 }
 
 export interface SlaMonitorRow {
+  id: string;
   name: string;
   total: number;
   total_with_sla: number;
@@ -107,7 +109,7 @@ export interface SlaMonitorTrendPoint {
 }
 
 export interface SlaMonitorData {
-  compliance_rate: number;
+  compliance_rate: number | null;
   total_with_sla: number;
   total_closed_on_time: number;
   on_track: number;
@@ -122,7 +124,7 @@ export interface SlaMonitorData {
     total_active: number;
     total_with_sla: number;
     sla_total: number;
-    compliance_rate: number;
+    compliance_rate: number | null;
     total_closed_on_time: number;
     on_track: number;
     warning: number;

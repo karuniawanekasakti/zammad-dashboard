@@ -27,6 +27,7 @@ const PRIORITY_MAP: Record<TicketPriority, { label: string; className: string }>
     label: "Very High",
     className: "bg-red-500/15 text-red-700 dark:text-red-400 border-red-500/30",
   },
+  unknown: { label: "Unknown", className: "bg-muted text-muted-foreground" },
 };
 
 export function PriorityBadge({ priority, className }: { priority: TicketPriority; className?: string }) {

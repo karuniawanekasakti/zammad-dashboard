@@ -25,6 +25,7 @@ class TicketPriority(str, Enum):
     normal = "normal"
     high = "high"
     very_high = "very high"
+    unknown = "unknown"
 
 
 class SlaStatus(str, Enum):

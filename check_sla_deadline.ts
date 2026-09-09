@@ -83,6 +83,10 @@ assert.equal(slaProgress(ticket("2026-09-08T12:00:00.000Z"), now), 50);
 
 const vite = await createServer({ server: { middlewareMode: true }, appType: "custom" });
 const { buildMockSlaMonitor } = await vite.ssrLoadModule("/src/lib/api.ts") as typeof import("./src/lib/api.ts");
+const { slaGroupPage } = await vite.ssrLoadModule("/src/pages/sla.tsx") as typeof import("./src/pages/sla.tsx");
+assert.deepEqual(slaGroupPage(12, 0), { index: 0, pageCount: 3, start: 0 });
+assert.deepEqual(slaGroupPage(12, 2), { index: 2, pageCount: 3, start: 10 });
+assert.deepEqual(slaGroupPage(3, 9), { index: 0, pageCount: 1, start: 0 });
 const mockTicket = (id: string, overrides: Partial<Ticket>): Ticket => ({
   ...ticket(null),
   id,

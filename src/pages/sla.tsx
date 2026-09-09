@@ -20,6 +20,14 @@ import type { SlaMonitorData, SlaMonitorRow, SlaMonitorTicket, SlaStatus, Ticket
 
 type TabValue = "all" | "on_track" | "warning" | "critical" | "breached" | "no_sla";
 
+const SLA_GROUP_PAGE_SIZE = 5;
+
+export function slaGroupPage(rowCount: number, pageIndex: number) {
+  const pageCount = Math.max(1, Math.ceil(rowCount / SLA_GROUP_PAGE_SIZE));
+  const index = Math.min(Math.max(pageIndex, 0), pageCount - 1);
+  return { index, pageCount, start: index * SLA_GROUP_PAGE_SIZE };
+}
+
 const FALLBACK_ZAMMAD_BASE = (import.meta.env.VITE_ZAMMAD_BASE_URL ?? "").replace(/\/$/, "");
 
 const STATUS_META: Record<SlaStatus, { label: string; bar: string; text: string; icon: string }> = {
@@ -43,6 +51,7 @@ export default function SlaPage() {
   const [groupFilter, setGroupFilter] = useState<string>("all");
   const [priorityFilter, setPriorityFilter] = useState<Ticket["priority"] | "all">("all");
   const [statusTab, setStatusTab] = useState<TabValue>("all");
+  const [groupPage, setGroupPage] = useState(0);
   const [showAllBreaches, setShowAllBreaches] = useState(false);
 
   const scope = useScope();
@@ -56,6 +65,8 @@ export default function SlaPage() {
     return statusTab === "all" ? rows : rows.filter((t) => t.live_sla_status === statusTab);
   }, [data?.tickets, statusTab]);
   const zammadBase = (config.data?.zammad_base_url ?? FALLBACK_ZAMMAD_BASE).replace(/\/$/, "");
+  const { index: groupPageIndex, pageCount: groupPageCount, start: groupPageStart } = slaGroupPage(data?.sla_rows.length ?? 0, groupPage);
+  const groupRows = data?.sla_rows.slice(groupPageStart, groupPageStart + SLA_GROUP_PAGE_SIZE) ?? [];
 
   if (monitor.isLoading) return <PageLoader />;
   if (monitor.isError || !data) {
@@ -79,7 +90,7 @@ export default function SlaPage() {
       <Card>
         <CardContent className="flex flex-wrap items-center gap-3 py-4">
           <span className="text-sm font-medium">Group</span>
-          <Select value={groupFilter} onValueChange={setGroupFilter}>
+          <Select value={groupFilter} onValueChange={(value) => { setGroupFilter(value); setGroupPage(0); }}>
             <SelectTrigger className="w-[220px]"><SelectValue placeholder="All groups" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All groups</SelectItem>
@@ -87,7 +98,7 @@ export default function SlaPage() {
             </SelectContent>
           </Select>
           <span className="text-sm font-medium">Priority</span>
-          <Select value={priorityFilter} onValueChange={(value) => setPriorityFilter(value as Ticket["priority"] | "all")}>
+          <Select value={priorityFilter} onValueChange={(value) => { setPriorityFilter(value as Ticket["priority"] | "all"); setGroupPage(0); }}>
             <SelectTrigger className="w-[180px]"><SelectValue placeholder="All priorities" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All priorities</SelectItem>
@@ -125,7 +136,16 @@ export default function SlaPage() {
             <CardDescription>Compliance rate tiket aktif berdasarkan group terpilih.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            {data.sla_rows.length ? data.sla_rows.map((row) => <ComplianceRow key={row.id} row={row} />) : <div className="py-8 text-center text-sm text-muted-foreground">Tidak ada tiket dalam scope ini.</div>}
+            {groupRows.length ? groupRows.map((row) => <ComplianceRow key={row.id} row={row} />) : <div className="py-8 text-center text-sm text-muted-foreground">Tidak ada tiket dalam scope ini.</div>}
+            {groupPageCount > 1 && (
+              <div className="flex items-center justify-between border-t pt-4 text-sm text-muted-foreground">
+                <span>Page {groupPageIndex + 1} of {groupPageCount}</span>
+                <div className="flex gap-2">
+                  <Button variant="outline" size="sm" onClick={() => setGroupPage(groupPageIndex - 1)} disabled={groupPageIndex === 0}>Previous</Button>
+                  <Button variant="outline" size="sm" onClick={() => setGroupPage(groupPageIndex + 1)} disabled={groupPageIndex === groupPageCount - 1}>Next</Button>
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>

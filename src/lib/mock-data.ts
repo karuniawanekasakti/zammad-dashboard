@@ -711,8 +711,9 @@ export const mockSettings = {
     duration_secs: 4.1,
     started_at: new Date(Date.now() - 150000).toISOString(),
     finished_at: new Date().toISOString(),
-    status: "ok",
+    status: "succeeded",
   } as SyncLastRun,
+  last_success_at: new Date().toISOString(),
 };
 
 // -- Exposed mutation helpers (for mock write ops) ---------------------------

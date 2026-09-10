@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2, PlugZap, RefreshCw, Shield, Save, Database, Server, AlertTriangle, CheckCircle, XCircle, Clock, Zap } from "lucide-react";
 import { format, formatDistanceToNow } from "date-fns";
@@ -15,17 +16,23 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 export default function SettingsPage() {
   const qc = useQueryClient();
 
-  const settings = useQuery({ queryKey: ["settings"], queryFn: () => api.getSettings() });
-  const statusQuery = useQuery({ queryKey: ["settings-status"], queryFn: () => api.getSettingsStatus(), refetchInterval: 30000 });
+  const settingsKey = ["settings", "bundle"] as const;
+  const statusKey = ["settings", "status"] as const;
+  const settings = useQuery({ queryKey: settingsKey, queryFn: () => api.getSettings() });
+  const statusQuery = useQuery({ queryKey: statusKey, queryFn: () => api.getSettingsStatus(), refetchInterval: 30000 });
 
   const s = settings.data;
-  const schedules = s?.schedules ?? { incremental_seconds: 300, full_reconcile_seconds: 21600 };
+  const [schedules, setSchedules] = useState({ incremental_seconds: 300, full_reconcile_seconds: 21600 });
+  useEffect(() => {
+    if (s?.schedules) setSchedules(s.schedules);
+  }, [s?.schedules]);
 
   const saveSchedules = useMutation({
     mutationFn: (patch: { incremental_seconds: number; full_reconcile_seconds: number }) => api.updateSchedules(patch),
     onSuccess: () => {
       toast.success("Schedules saved — applies on next beat tick");
-      qc.invalidateQueries({ queryKey: ["settings"] });
+      qc.invalidateQueries({ queryKey: settingsKey });
+      qc.invalidateQueries({ queryKey: statusKey });
     },
     onError: (e: Error) => toast.error(`Failed: ${e.message}`),
   });
@@ -34,7 +41,7 @@ export default function SettingsPage() {
     mutationFn: () => api.triggerSyncByKind("incremental"),
     onSuccess: () => {
       toast.success("Incremental sync triggered");
-      qc.invalidateQueries({ queryKey: ["settings", "settings-status"] });
+      qc.invalidateQueries({ queryKey: statusKey });
     },
     onError: (e: Error) => toast.error(`Failed: ${e.message}`),
   });
@@ -43,7 +50,7 @@ export default function SettingsPage() {
     mutationFn: () => api.triggerSyncByKind("full"),
     onSuccess: () => {
       toast.success("Full reconcile triggered");
-      qc.invalidateQueries({ queryKey: ["settings", "settings-status"] });
+      qc.invalidateQueries({ queryKey: statusKey });
     },
     onError: (e: Error) => toast.error(`Failed: ${e.message}`),
   });
@@ -52,12 +59,21 @@ export default function SettingsPage() {
     mutationFn: () => api.purgeCache(),
     onSuccess: (res) => {
       toast.success(`Cache purged: ${res.purged} keys`);
-      qc.invalidateQueries({ queryKey: ["settings", "settings-status"] });
+      qc.invalidateQueries({ queryKey: statusKey });
     },
     onError: (e: Error) => toast.error(`Failed: ${e.message}`),
   });
 
   const st = statusQuery.data;
+  const syncStatus = st ?? s;
+  const freshness = syncStatus?.freshness;
+  const latestAttempt = syncStatus?.latest_attempt;
+  const freshnessLabel = {
+    never_synced: "Never Synced",
+    up_to_date: "Up to Date",
+    out_of_date: "Out of Date",
+  }[freshness?.status ?? "never_synced"];
+  const freshnessVariant = freshness?.status === "up_to_date" ? "success" : freshness?.status === "out_of_date" ? "warning" : "secondary";
 
   const healthBadge = (v: string) =>
     v === "ok" ? <Badge variant="success">Online</Badge> : <Badge variant="destructive">Down</Badge>;
@@ -65,6 +81,38 @@ export default function SettingsPage() {
   return (
     <div className="space-y-4">
       <PageHeader title="System Settings" description="Admin-only. Worker config, manual sync, health monitoring." />
+
+      <Card>
+        <CardContent className="grid gap-4 pt-6 md:grid-cols-2">
+          <div className="space-y-1">
+            <p className="text-xs text-muted-foreground">Data freshness</p>
+            <div className="flex items-center gap-2">
+              <Badge variant={freshnessVariant}>{freshnessLabel}</Badge>
+              {freshness?.last_success_at && (
+                <span className="text-xs text-muted-foreground">
+                  Last successful sync {formatDistanceToNow(new Date(freshness.last_success_at), { addSuffix: true })}
+                </span>
+              )}
+            </div>
+            {freshness?.status === "never_synced" && <p className="text-xs text-muted-foreground">No successful synchronization checkpoint is available.</p>}
+          </div>
+          <div className="space-y-1">
+            <p className="text-xs text-muted-foreground">Latest sync attempt</p>
+            {latestAttempt ? (
+              <div className="flex items-center gap-2">
+                <Badge variant={latestAttempt.status === "succeeded" ? "success" : latestAttempt.status === "failed" ? "destructive" : "warning"}>
+                  {latestAttempt.status === "succeeded" ? "Succeeded" : latestAttempt.status === "failed" ? "Failed" : "Interrupted"}
+                </Badge>
+                <span className="text-xs text-muted-foreground capitalize">
+                  {latestAttempt.kind === "full" ? "Full Reconcile" : "Incremental Sync"} · {latestAttempt.triggered_by}
+                </span>
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">No sync attempt recorded yet.</p>
+            )}
+          </div>
+        </CardContent>
+      </Card>
 
       <Tabs defaultValue="worker" className="space-y-4">
         <TabsList>
@@ -87,7 +135,7 @@ export default function SettingsPage() {
                   <Input
                     type="number"
                     value={schedules.incremental_seconds}
-                    onChange={(e) => (schedules.incremental_seconds = parseInt(e.target.value, 10))}
+                    onChange={(e) => setSchedules((current) => ({ ...current, incremental_seconds: parseInt(e.target.value, 10) }))}
                     min={30}
                     max={604800}
                   />
@@ -98,7 +146,7 @@ export default function SettingsPage() {
                   <Input
                     type="number"
                     value={schedules.full_reconcile_seconds}
-                    onChange={(e) => (schedules.full_reconcile_seconds = parseInt(e.target.value, 10))}
+                    onChange={(e) => setSchedules((current) => ({ ...current, full_reconcile_seconds: parseInt(e.target.value, 10) }))}
                     min={30}
                     max={604800}
                   />
@@ -167,19 +215,19 @@ export default function SettingsPage() {
               <div className="grid gap-4 md:grid-cols-3">
                 <div className="space-y-1 p-3 rounded border">
                   <p className="text-xs text-muted-foreground">Last Run</p>
-                  <p className="font-medium">{s?.last_run?.kind ? s.last_run.kind.charAt(0).toUpperCase() + s.last_run.kind.slice(1) : "—"}</p>
-                  <p className="text-xs text-muted-foreground">Triggered by: {s?.last_run?.triggered_by ?? "—"}</p>
+                  <p className="font-medium">{latestAttempt?.kind ? latestAttempt.kind.charAt(0).toUpperCase() + latestAttempt.kind.slice(1) : "—"}</p>
+                  <p className="text-xs text-muted-foreground">Triggered by: {latestAttempt?.triggered_by ?? "—"}</p>
                 </div>
                 <div className="space-y-1 p-3 rounded border">
                   <p className="text-xs text-muted-foreground">Tickets / Users / Groups</p>
                   <p className="font-medium">
-                    {s?.last_run?.tickets ?? 0} / {s?.last_run?.users ?? 0} / {s?.last_run?.groups ?? 0}
+                    {latestAttempt?.tickets ?? 0} / {latestAttempt?.users ?? 0} / {latestAttempt?.groups ?? 0}
                   </p>
                 </div>
                 <div className="space-y-1 p-3 rounded border">
                   <p className="text-xs text-muted-foreground">Duration</p>
-                  <p className="font-medium">{s?.last_run?.duration_secs ?? 0}s</p>
-                  <p className="text-xs text-muted-foreground">{s?.last_run?.finished_at ? formatDistanceToNow(new Date(s.last_run.finished_at), { addSuffix: true }) : "—"}</p>
+                  <p className="font-medium">{latestAttempt?.duration_secs ?? 0}s</p>
+                  <p className="text-xs text-muted-foreground">{latestAttempt?.finished_at ? formatDistanceToNow(new Date(latestAttempt.finished_at), { addSuffix: true }) : "—"}</p>
                 </div>
               </div>
 
@@ -279,28 +327,28 @@ export default function SettingsPage() {
               <CardDescription>Telemetry from the most recent sync (written after completion).</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              {s?.last_run ? (
+              {latestAttempt ? (
                 <dl className="grid grid-cols-2 gap-4 text-sm">
                   <dt className="text-muted-foreground">Kind</dt>
-                  <dd className="font-medium capitalize">{s.last_run.kind}</dd>
+                  <dd className="font-medium capitalize">{latestAttempt.kind}</dd>
                   <dt className="text-muted-foreground">Triggered By</dt>
-                  <dd className="font-medium">{s.last_run.triggered_by}</dd>
+                  <dd className="font-medium">{latestAttempt.triggered_by}</dd>
                   <dt className="text-muted-foreground">Status</dt>
                   <dd className="font-medium">
-                    {s.last_run.status === "ok" ? (
-                      <span className="flex items-center gap-1 text-green-600"><CheckCircle className="size-4" /> OK</span>
+                    {latestAttempt.status === "succeeded" ? (
+                      <span className="flex items-center gap-1 text-green-600"><CheckCircle className="size-4" /> Succeeded</span>
                     ) : (
-                      <span className="flex items-center gap-1 text-red-600"><XCircle className="size-4" /> Error</span>
+                      <span className="flex items-center gap-1 text-red-600"><XCircle className="size-4" /> {latestAttempt.status === "failed" ? "Failed" : "Interrupted"}</span>
                     )}
                   </dd>
                   <dt className="text-muted-foreground">Duration</dt>
-                  <dd className="font-medium">{s.last_run.duration_secs}s</dd>
+                  <dd className="font-medium">{latestAttempt.duration_secs}s</dd>
                   <dt className="text-muted-foreground">Started</dt>
-                  <dd className="font-medium">{s.last_run.started_at ? format(new Date(s.last_run.started_at), "PPp") : "—"}</dd>
+                  <dd className="font-medium">{latestAttempt.started_at ? format(new Date(latestAttempt.started_at), "PPp") : "—"}</dd>
                   <dt className="text-muted-foreground">Finished</dt>
-                  <dd className="font-medium">{s.last_run.finished_at ? format(new Date(s.last_run.finished_at), "PPp") : "—"}</dd>
+                  <dd className="font-medium">{latestAttempt.finished_at ? format(new Date(latestAttempt.finished_at), "PPp") : "—"}</dd>
                   <dt className="text-muted-foreground">Tickets / Users / Groups</dt>
-                  <dd className="font-medium">{s.last_run.tickets} / {s.last_run.users} / {s.last_run.groups}</dd>
+                  <dd className="font-medium">{latestAttempt.tickets} / {latestAttempt.users} / {latestAttempt.groups}</dd>
                 </dl>
               ) : (
                 <p className="text-muted-foreground">No sync run recorded yet.</p>

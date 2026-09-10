@@ -594,13 +594,23 @@ const mockApi = {
 
   // Settings / admin -----------------------------------------------------------
   async getSettings(): Promise<SettingsBundle> {
+    const now = new Date();
+    const staleAfter = new Date(new Date(mockSettings.last_success_at).getTime() + (mockSettings.schedules.incremental_seconds + 120) * 1000);
     return delay({
       schedules: { ...mockSettings.schedules },
       last_run: mockSettings.last_run,
+      latest_attempt: mockSettings.last_run,
+      freshness: {
+        status: now <= staleAfter ? "up_to_date" as const : "out_of_date" as const,
+        last_success_at: mockSettings.last_success_at,
+        stale_after: staleAfter.toISOString(),
+        checkpoint_source: "dedicated" as const,
+      },
       worker: { reachable: true, workers: [] },
       health: { redis: "ok", database: "ok", zammad: systemSettings.zammad_online ? "ok" : "down" },
       zammad_base_url: systemSettings.zammad_base_url,
       data_retention_days: systemSettings.data_retention_days,
+      now: now.toISOString(),
     });
   },
 
@@ -619,9 +629,10 @@ const mockApi = {
       duration_secs: kind === "full" ? 142.3 : 4.1,
       started_at: new Date(Date.now() - 150000).toISOString(),
       finished_at: new Date().toISOString(),
-      status: "ok",
+      status: "succeeded",
     };
-    systemSettings.last_sync_at = new Date().toISOString();
+    mockSettings.last_success_at = new Date().toISOString();
+    systemSettings.last_sync_at = mockSettings.last_success_at;
     return delay({ triggered: true, kind }, 400);
   },
 
@@ -630,11 +641,20 @@ const mockApi = {
   },
 
   async getSettingsStatus(): Promise<SettingsStatus> {
+    const now = new Date();
+    const staleAfter = new Date(new Date(mockSettings.last_success_at).getTime() + (mockSettings.schedules.incremental_seconds + 120) * 1000);
     return delay({
       worker: { reachable: true, workers: [] },
       health: { redis: "ok", database: "ok", zammad: systemSettings.zammad_online ? "ok" : "down" },
       last_run: mockSettings.last_run,
-      now: new Date().toISOString(),
+      latest_attempt: mockSettings.last_run,
+      freshness: {
+        status: now <= staleAfter ? "up_to_date" : "out_of_date",
+        last_success_at: mockSettings.last_success_at,
+        stale_after: staleAfter.toISOString(),
+        checkpoint_source: "dedicated",
+      },
+      now: now.toISOString(),
     });
   },
 };

@@ -25,6 +25,7 @@ from app.zammad_client import zammad
 
 SYNC_WATERMARK_KEY = "sync:last_ticket_updated_at"
 LAST_RUN_KEY = "sync:last_run"
+LAST_SUCCESS_KEY = "sync:last_successful_checkpoint"
 
 
 def _map_groups(raw_groups: list[dict], raw_users: list[dict]):
@@ -98,9 +99,10 @@ async def _invalidate_caches() -> None:
 
 
 async def _record_last_run(kind: str, counts: dict, started_wall: datetime, started_mono: float, status: str) -> None:
-    """Write sync-run telemetry to the settings table for the Settings page."""
+    """Write sync-run telemetry and advance freshness only on success."""
     async def _do(session_factory):
         async with session_factory() as session:
+            finished_at = datetime.now(timezone.utc)
             await set_setting(
                 session,
                 LAST_RUN_KEY,
@@ -112,10 +114,12 @@ async def _record_last_run(kind: str, counts: dict, started_wall: datetime, star
                     "groups": counts.get("groups", 0),
                     "duration_secs": round(perf_counter() - started_mono, 1),
                     "started_at": started_wall.isoformat(),
-                    "finished_at": datetime.now(timezone.utc).isoformat(),
+                    "finished_at": finished_at.isoformat(),
                     "status": status,
                 },
             )
+            if status == "ok":
+                await set_setting(session, LAST_SUCCESS_KEY, {"value": finished_at.isoformat()})
 
     try:
         await _with_engine(_do)
@@ -150,10 +154,14 @@ async def run_incremental_sync() -> dict:
             await set_setting(session, SYNC_WATERMARK_KEY, {"value": datetime.now(timezone.utc).isoformat()})
         return len(tickets)
 
-    count = await _with_engine(_do)
-    await _invalidate_caches()
-    await _record_last_run("incremental", {"tickets": count}, started_wall, started_mono, "ok")
-    return {"synced": count, "updated_since": updated_since}
+    try:
+        count = await _with_engine(_do)
+        await _record_last_run("incremental", {"tickets": count}, started_wall, started_mono, "ok")
+        await _invalidate_caches()
+        return {"synced": count, "updated_since": updated_since}
+    except Exception:
+        await _record_last_run("incremental", {}, started_wall, started_mono, "error")
+        raise
 
 
 async def run_full_sync() -> dict:
@@ -190,10 +198,14 @@ async def run_full_sync() -> dict:
         counts.update(tickets=len(tickets), users=len(users), groups=len(groups))
         return counts
 
-    counts = await _with_engine(_do)
-    await _invalidate_caches()
-    await _record_last_run("full", counts, started_wall, started_mono, "ok")
-    return counts
+    try:
+        counts = await _with_engine(_do)
+        await _record_last_run("full", counts, started_wall, started_mono, "ok")
+        await _invalidate_caches()
+        return counts
+    except Exception:
+        await _record_last_run("full", counts, started_wall, started_mono, "error")
+        raise
 
 
 async def sync_ticket_core(ticket_id: int) -> dict | None:

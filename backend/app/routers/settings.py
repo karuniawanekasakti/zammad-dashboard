@@ -1,5 +1,5 @@
 """Admin settings: Celery/worker config, manual sync triggers, health monitoring."""
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends
@@ -18,6 +18,9 @@ router = APIRouter()
 
 SCHEDULES_KEY = "sync:schedules"
 LAST_RUN_KEY = "sync:last_run"
+LAST_SUCCESS_KEY = "sync:last_successful_checkpoint"
+SYNC_WATERMARK_KEY = "sync:last_ticket_updated_at"
+FRESHNESS_GRACE_SECONDS = 120
 
 MIN_SECONDS = 30
 MAX_SECONDS = 86400 * 7
@@ -32,6 +35,58 @@ class SchedulesIn(BaseModel):
 
 class SyncTriggerIn(BaseModel):
     kind: Literal["incremental", "full"] = "incremental"
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _parse_datetime(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed.replace(tzinfo=parsed.tzinfo or timezone.utc)
+
+
+def _normalize_last_run(last_run: dict | None) -> dict | None:
+    if not last_run:
+        return None
+    normalized = dict(last_run)
+    normalized["status"] = {
+        "ok": "succeeded",
+        "error": "failed",
+    }.get(normalized.get("status"), normalized.get("status"))
+    return normalized
+
+
+def _freshness(checkpoint: datetime | None, schedules: dict, now: datetime, checkpoint_source: str | None) -> dict:
+    if checkpoint is None:
+        return {"status": "never_synced", "last_success_at": None, "checkpoint_source": None}
+    stale_after = checkpoint + timedelta(seconds=int(schedules.get("incremental_seconds", DEFAULT_SCHEDULES["incremental_seconds"])) + FRESHNESS_GRACE_SECONDS)
+    return {
+        "status": "up_to_date" if now <= stale_after else "out_of_date",
+        "last_success_at": checkpoint.isoformat(),
+        "stale_after": stale_after.isoformat(),
+        "checkpoint_source": checkpoint_source,
+    }
+
+
+async def _sync_status(db: AsyncSession, now: datetime) -> dict:
+    schedules = (await get_setting(db, SCHEDULES_KEY)) or DEFAULT_SCHEDULES
+    checkpoint_setting = await get_setting(db, LAST_SUCCESS_KEY)
+    checkpoint_source = "dedicated"
+    if not checkpoint_setting:
+        checkpoint_setting = await get_setting(db, SYNC_WATERMARK_KEY)
+        checkpoint_source = "watermark" if checkpoint_setting else None
+    checkpoint = _parse_datetime(checkpoint_setting.get("value") if checkpoint_setting else None)
+    return {
+        "freshness": _freshness(checkpoint, schedules, now, checkpoint_source),
+        "latest_attempt": _normalize_last_run(await get_setting(db, LAST_RUN_KEY)),
+        "now": now.isoformat(),
+    }
 
 
 def _get_worker_status() -> dict:
@@ -68,11 +123,12 @@ async def _get_health(db: AsyncSession) -> dict:
 @router.get("", response_model=ApiResponse)
 async def get_settings(current: Annotated[dict, Depends(require_roles(Role.admin))], db: Annotated[AsyncSession, Depends(get_db)]):
     schedules = (await get_setting(db, SCHEDULES_KEY)) or DEFAULT_SCHEDULES
-    last_run = await get_setting(db, LAST_RUN_KEY)
+    sync_status = await _sync_status(db, _utcnow())
     return ApiResponse(
         data={
             "schedules": schedules,
-            "last_run": last_run,
+            "last_run": sync_status["latest_attempt"],
+            **sync_status,
             "worker": _get_worker_status(),
             "health": await _get_health(db),
             "zammad_base_url": app_settings.zammad_base_url,
@@ -125,12 +181,12 @@ async def purge_cache(current: Annotated[dict, Depends(require_roles(Role.admin)
 
 @router.get("/status", response_model=ApiResponse)
 async def status(current: Annotated[dict, Depends(require_roles(Role.admin))], db: Annotated[AsyncSession, Depends(get_db)]):
-    last_run = await get_setting(db, LAST_RUN_KEY)
+    sync_status = await _sync_status(db, _utcnow())
     return ApiResponse(
         data={
             "worker": _get_worker_status(),
             "health": await _get_health(db),
-            "last_run": last_run,
-            "now": datetime.now(timezone.utc).isoformat(),
+            "last_run": sync_status["latest_attempt"],
+            **sync_status,
         }
     )

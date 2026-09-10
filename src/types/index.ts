@@ -330,7 +330,14 @@ export interface SyncLastRun {
   duration_secs: number;
   started_at: string;
   finished_at: string;
-  status: "ok" | "error";
+  status: "succeeded" | "failed" | "interrupted";
+}
+
+export interface SyncFreshness {
+  status: "never_synced" | "up_to_date" | "out_of_date";
+  last_success_at: string | null;
+  stale_after?: string;
+  checkpoint_source: "dedicated" | "watermark" | null;
 }
 
 export interface WorkerStatus {
@@ -342,16 +349,21 @@ export interface WorkerStatus {
 export interface SettingsBundle {
   schedules: SyncSchedules;
   last_run: SyncLastRun | null;
+  latest_attempt: SyncLastRun | null;
+  freshness: SyncFreshness;
   worker: WorkerStatus;
   health: { redis: string; database: string; zammad: string };
   zammad_base_url: string;
   data_retention_days: number;
+  now: string;
 }
 
 export interface SettingsStatus {
   worker: WorkerStatus;
   health: { redis: string; database: string; zammad: string };
   last_run: SyncLastRun | null;
+  latest_attempt: SyncLastRun | null;
+  freshness: SyncFreshness;
   now: string;
 }
 

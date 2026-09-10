@@ -142,7 +142,7 @@ function AdminDashboard({ scope, agentFilter, chart }: { scope: ReturnType<typeo
   const breach = useQuery({ queryKey: ["trend", "breach", 30], queryFn: () => api.slaBreachTrend(30) });
   const agents = useQuery({ queryKey: ["agents", scope], queryFn: () => api.listAgents(scope) });
   const notifications = useQuery({ queryKey: ["notifications"], queryFn: () => api.listNotifications() });
-  const settings = useQuery({ queryKey: ["settings"], queryFn: () => api.getSystemSettings() });
+  const settings = useQuery({ queryKey: ["dashboard", "system-settings"], queryFn: () => api.getSystemSettings() });
 
   const top = (agents.data ?? [])
     .filter((s) => agentFilter === "all" || s.agent.id === agentFilter)

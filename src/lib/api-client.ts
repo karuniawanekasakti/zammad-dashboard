@@ -19,6 +19,7 @@ import type {
   SlaMonitorData,
   SlaPolicy,
   SyncSchedules,
+  SyncTriggerResult,
   SystemSettings,
   Ticket,
   TicketArticle,
@@ -276,7 +277,7 @@ export const apiClient = {
     return this.getSystemSettings();
   },
 
-  async triggerSync(): Promise<{ ok: true }> {
+  async triggerSync(): Promise<SyncTriggerResult> {
     return request("/system/sync/trigger", { method: "POST" });
   },
 
@@ -291,8 +292,8 @@ export const apiClient = {
     return request("/settings/schedules", { method: "PUT", body: JSON.stringify(next) });
   },
 
-  async triggerSyncByKind(kind: "incremental" | "full"): Promise<{ triggered: boolean; kind: string }> {
-    return request("/settings/sync", { method: "POST", body: JSON.stringify({ kind }) });
+  async triggerSyncByKind(kind: "incremental" | "full", source: "manual" | "automatic" = "manual"): Promise<SyncTriggerResult> {
+    return request("/settings/sync", { method: "POST", body: JSON.stringify({ kind, source }) });
   },
 
   async purgeCache(): Promise<{ purged: number }> {

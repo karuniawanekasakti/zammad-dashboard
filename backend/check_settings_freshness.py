@@ -26,7 +26,7 @@ async def main() -> None:
     settings._utcnow = lambda: now
 
     async def read_status():
-        return (await settings.status(current={"role": "admin"}, db=object())).data
+        return (await settings.status(current={"role": "admin"}, db=object(), redis=None)).data
 
     result = await read_status()
     assert result["freshness"]["status"] == "never_synced"

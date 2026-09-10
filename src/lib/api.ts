@@ -40,6 +40,7 @@ import type {
   SlaMonitorData,
   SlaPolicy,
   SyncSchedules,
+  SyncTriggerResult,
   SystemSettings,
   Ticket,
   TicketArticle,
@@ -587,9 +588,8 @@ const mockApi = {
     return delay({ ...systemSettings }, 120);
   },
 
-  async triggerSync(): Promise<{ ok: true }> {
-    systemSettings.last_sync_at = new Date().toISOString();
-    return delay({ ok: true as const }, 600);
+  async triggerSync(): Promise<SyncTriggerResult> {
+    return this.triggerSyncByKind("full");
   },
 
   // Settings / admin -----------------------------------------------------------
@@ -599,6 +599,7 @@ const mockApi = {
     return delay({
       schedules: { ...mockSettings.schedules },
       last_run: mockSettings.last_run,
+      execution: null,
       latest_attempt: mockSettings.last_run,
       freshness: {
         status: now <= staleAfter ? "up_to_date" as const : "out_of_date" as const,
@@ -619,21 +620,24 @@ const mockApi = {
     return delay({ schedules: mockSettings.schedules, applied_on_next_beat: true }, 200);
   },
 
-  async triggerSyncByKind(kind: "incremental" | "full"): Promise<{ triggered: boolean; kind: string }> {
-    mockSettings.last_run = {
+  async triggerSyncByKind(kind: "incremental" | "full", source: "manual" | "automatic" = "manual"): Promise<SyncTriggerResult> {
+    const operation = {
+      operation_id: uuid("sync", Date.now()),
       kind,
-      triggered_by: "manual",
+      source,
+      triggered_by: source,
       tickets: kind === "full" ? 496 : 12,
       users: kind === "full" ? 85 : 0,
       groups: kind === "full" ? 20 : 0,
       duration_secs: kind === "full" ? 142.3 : 4.1,
       started_at: new Date(Date.now() - 150000).toISOString(),
       finished_at: new Date().toISOString(),
-      status: "succeeded",
+      status: "succeeded" as const,
     };
+    mockSettings.last_run = operation;
     mockSettings.last_success_at = new Date().toISOString();
     systemSettings.last_sync_at = mockSettings.last_success_at;
-    return delay({ triggered: true, kind }, 400);
+    return delay({ triggered: true, attached: false, kind, operation }, 400);
   },
 
   async purgeCache(): Promise<{ purged: number }> {
@@ -647,6 +651,7 @@ const mockApi = {
       worker: { reachable: true, workers: [] },
       health: { redis: "ok", database: "ok", zammad: systemSettings.zammad_online ? "ok" : "down" },
       last_run: mockSettings.last_run,
+      execution: null,
       latest_attempt: mockSettings.last_run,
       freshness: {
         status: now <= staleAfter ? "up_to_date" : "out_of_date",

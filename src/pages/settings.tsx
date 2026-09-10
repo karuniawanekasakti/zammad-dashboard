@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 export default function SettingsPage() {
   const qc = useQueryClient();
@@ -19,9 +20,14 @@ export default function SettingsPage() {
   const settingsKey = ["settings", "bundle"] as const;
   const statusKey = ["settings", "status"] as const;
   const settings = useQuery({ queryKey: settingsKey, queryFn: () => api.getSettings() });
-  const statusQuery = useQuery({ queryKey: statusKey, queryFn: () => api.getSettingsStatus(), refetchInterval: 30000 });
+  const statusQuery = useQuery({
+    queryKey: statusKey,
+    queryFn: () => api.getSettingsStatus(),
+    refetchInterval: (query) => query.state.data?.execution ? 2000 : 30000,
+  });
 
   const s = settings.data;
+  const [confirmFull, setConfirmFull] = useState(false);
   const [schedules, setSchedules] = useState({ incremental_seconds: 300, full_reconcile_seconds: 21600 });
   useEffect(() => {
     if (s?.schedules) setSchedules(s.schedules);
@@ -37,20 +43,24 @@ export default function SettingsPage() {
     onError: (e: Error) => toast.error(`Failed: ${e.message}`),
   });
 
+  const handleTriggerResult = (result: Awaited<ReturnType<typeof api.triggerSyncByKind>>) => {
+    if (result.error) toast.error(result.error);
+    else if (result.attached) toast.info("Attached to the active sync operation");
+    else toast.success(result.kind === "full" ? "Full Reconcile queued" : "Incremental Sync queued");
+    qc.invalidateQueries({ queryKey: statusKey });
+  };
+
   const triggerIncremental = useMutation({
     mutationFn: () => api.triggerSyncByKind("incremental"),
-    onSuccess: () => {
-      toast.success("Incremental sync triggered");
-      qc.invalidateQueries({ queryKey: statusKey });
-    },
+    onSuccess: handleTriggerResult,
     onError: (e: Error) => toast.error(`Failed: ${e.message}`),
   });
 
   const triggerFull = useMutation({
     mutationFn: () => api.triggerSyncByKind("full"),
-    onSuccess: () => {
-      toast.success("Full reconcile triggered");
-      qc.invalidateQueries({ queryKey: statusKey });
+    onSuccess: (result) => {
+      setConfirmFull(false);
+      handleTriggerResult(result);
     },
     onError: (e: Error) => toast.error(`Failed: ${e.message}`),
   });
@@ -66,14 +76,20 @@ export default function SettingsPage() {
 
   const st = statusQuery.data;
   const syncStatus = st ?? s;
+  const statusUnavailable = statusQuery.isError;
   const freshness = syncStatus?.freshness;
+  const execution = syncStatus?.execution;
   const latestAttempt = syncStatus?.latest_attempt;
-  const freshnessLabel = {
+  const activeLabel = execution
+    ? `${execution.kind === "full" ? "Full Reconcile" : "Incremental Sync"} · ${execution.source ?? execution.triggered_by}`
+    : null;
+  const syncBusy = Boolean(execution) || statusUnavailable || triggerIncremental.isPending || triggerFull.isPending;
+  const freshnessLabel = statusUnavailable ? "Status Unavailable" : {
     never_synced: "Never Synced",
     up_to_date: "Up to Date",
     out_of_date: "Out of Date",
   }[freshness?.status ?? "never_synced"];
-  const freshnessVariant = freshness?.status === "up_to_date" ? "success" : freshness?.status === "out_of_date" ? "warning" : "secondary";
+  const freshnessVariant = statusUnavailable ? "destructive" : freshness?.status === "up_to_date" ? "success" : freshness?.status === "out_of_date" ? "warning" : "secondary";
 
   const healthBadge = (v: string) =>
     v === "ok" ? <Badge variant="success">Online</Badge> : <Badge variant="destructive">Down</Badge>;
@@ -83,7 +99,7 @@ export default function SettingsPage() {
       <PageHeader title="System Settings" description="Admin-only. Worker config, manual sync, health monitoring." />
 
       <Card>
-        <CardContent className="grid gap-4 pt-6 md:grid-cols-2">
+        <CardContent className="grid gap-4 pt-6 md:grid-cols-3">
           <div className="space-y-1">
             <p className="text-xs text-muted-foreground">Data freshness</p>
             <div className="flex items-center gap-2">
@@ -94,14 +110,29 @@ export default function SettingsPage() {
                 </span>
               )}
             </div>
-            {freshness?.status === "never_synced" && <p className="text-xs text-muted-foreground">No successful synchronization checkpoint is available.</p>}
+            {statusUnavailable ? (
+              <p className="text-xs text-destructive">Last-known values may be stale. Triggers are disabled until status recovers.</p>
+            ) : freshness?.status === "never_synced" && (
+              <p className="text-xs text-muted-foreground">No successful synchronization checkpoint is available.</p>
+            )}
+          </div>
+          <div className="space-y-1">
+            <p className="text-xs text-muted-foreground">Sync execution</p>
+            {execution ? (
+              <div className="flex items-center gap-2">
+                <Badge variant="warning">{execution.status === "queued" ? "Queued" : execution.kind === "full" ? "Running Full Reconcile" : "Running Incremental Sync"}</Badge>
+                <span className="text-xs text-muted-foreground capitalize">{execution.source ?? execution.triggered_by}</span>
+              </div>
+            ) : (
+              <Badge variant="secondary">Idle</Badge>
+            )}
           </div>
           <div className="space-y-1">
             <p className="text-xs text-muted-foreground">Latest sync attempt</p>
             {latestAttempt ? (
               <div className="flex items-center gap-2">
                 <Badge variant={latestAttempt.status === "succeeded" ? "success" : latestAttempt.status === "failed" ? "destructive" : "warning"}>
-                  {latestAttempt.status === "succeeded" ? "Succeeded" : latestAttempt.status === "failed" ? "Failed" : "Interrupted"}
+                  {latestAttempt.status === "queued" ? "Queued" : latestAttempt.status === "running" ? "Running" : latestAttempt.status === "succeeded" ? "Succeeded" : latestAttempt.status === "failed" ? "Failed" : "Interrupted"}
                 </Badge>
                 <span className="text-xs text-muted-foreground capitalize">
                   {latestAttempt.kind === "full" ? "Full Reconcile" : "Incremental Sync"} · {latestAttempt.triggered_by}
@@ -195,20 +226,36 @@ export default function SettingsPage() {
               <div className="flex flex-wrap gap-3">
                 <Button
                   onClick={() => triggerIncremental.mutate()}
-                  disabled={triggerIncremental.isPending || triggerFull.isPending}
+                  disabled={syncBusy}
+                  title={statusUnavailable ? "Disabled while sync status is unavailable" : activeLabel ? `Disabled while ${activeLabel} is active` : undefined}
                 >
                   {triggerIncremental.isPending ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
                   Trigger Incremental
                 </Button>
                 <Button
                   variant="destructive"
-                  onClick={() => triggerFull.mutate()}
-                  disabled={triggerIncremental.isPending || triggerFull.isPending}
+                  onClick={() => setConfirmFull(true)}
+                  disabled={syncBusy}
+                  title={statusUnavailable ? "Disabled while sync status is unavailable" : activeLabel ? `Disabled while ${activeLabel} is active` : undefined}
                 >
                   {triggerFull.isPending ? <Loader2 className="size-4 animate-spin" /> : <Database className="size-4" />}
                   Trigger Full Reconcile
                 </Button>
               </div>
+              {activeLabel && <p className="text-xs text-muted-foreground">Controls are disabled while {activeLabel} is active.</p>}
+
+              {execution && (
+                <div className="rounded-md border p-3 text-sm">
+                  <div className="flex items-center gap-2">
+                    <Loader2 className="size-4 animate-spin" />
+                    <span className="font-medium">{execution.phase?.replace(/_/g, " ") ?? execution.status}</span>
+                  </div>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Tickets {execution.processed?.tickets ?? 0} · Users {execution.processed?.users ?? 0} · Groups {execution.processed?.groups ?? 0} · Histories {execution.processed?.histories ?? 0}
+                  </p>
+                  {execution.lease_expires_at && <p className="text-xs text-muted-foreground">Lease expires {format(new Date(execution.lease_expires_at), "PPp")}</p>}
+                </div>
+              )}
 
               <Separator />
 
@@ -337,6 +384,8 @@ export default function SettingsPage() {
                   <dd className="font-medium">
                     {latestAttempt.status === "succeeded" ? (
                       <span className="flex items-center gap-1 text-green-600"><CheckCircle className="size-4" /> Succeeded</span>
+                    ) : latestAttempt.status === "queued" || latestAttempt.status === "running" ? (
+                      <span className="flex items-center gap-1"><Loader2 className="size-4 animate-spin" /> {latestAttempt.status === "queued" ? "Queued" : "Running"}</span>
                     ) : (
                       <span className="flex items-center gap-1 text-red-600"><XCircle className="size-4" /> {latestAttempt.status === "failed" ? "Failed" : "Interrupted"}</span>
                     )}
@@ -348,7 +397,13 @@ export default function SettingsPage() {
                   <dt className="text-muted-foreground">Finished</dt>
                   <dd className="font-medium">{latestAttempt.finished_at ? format(new Date(latestAttempt.finished_at), "PPp") : "—"}</dd>
                   <dt className="text-muted-foreground">Tickets / Users / Groups</dt>
-                  <dd className="font-medium">{latestAttempt.tickets} / {latestAttempt.users} / {latestAttempt.groups}</dd>
+                  <dd className="font-medium">{latestAttempt.processed?.tickets ?? latestAttempt.tickets ?? 0} / {latestAttempt.processed?.users ?? latestAttempt.users ?? 0} / {latestAttempt.processed?.groups ?? latestAttempt.groups ?? 0}</dd>
+                  {latestAttempt.error && (
+                    <>
+                      <dt className="text-muted-foreground">Error</dt>
+                      <dd className="font-medium text-destructive">{latestAttempt.error}</dd>
+                    </>
+                  )}
                 </dl>
               ) : (
                 <p className="text-muted-foreground">No sync run recorded yet.</p>
@@ -357,6 +412,24 @@ export default function SettingsPage() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      <Dialog open={confirmFull} onOpenChange={setConfirmFull}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Run Full Reconcile?</DialogTitle>
+            <DialogDescription>
+              Full Reconcile scans all tickets, users, groups, and ticket histories. It may take several minutes and shares the same operation slot as Incremental Sync.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmFull(false)}>Cancel</Button>
+            <Button variant="destructive" onClick={() => triggerFull.mutate()} disabled={triggerFull.isPending}>
+              {triggerFull.isPending && <Loader2 className="size-4 animate-spin" />}
+              Run Full Reconcile
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

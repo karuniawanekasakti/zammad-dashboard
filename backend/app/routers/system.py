@@ -49,18 +49,12 @@ async def sync_status(current: Annotated[dict, Depends(require_roles(Role.admin)
 
 
 @router.post("/sync/trigger", response_model=ApiResponse)
-async def trigger_sync(current: Annotated[dict, Depends(require_roles(Role.admin))]):
-    try:
-        from app.tasks import sync_full_reconcile
+async def trigger_sync(
+    current: Annotated[dict, Depends(require_roles(Role.admin))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    redis=Depends(get_redis),
+):
+    """Legacy Full Reconcile trigger routed through the shared operation slot."""
+    from app.routers.settings import SyncTriggerIn, trigger_sync as trigger_settings_sync
 
-        sync_full_reconcile.delay()
-        return ApiResponse(data={"triggered": True, "task": "sync_full_reconcile"})
-    except Exception:
-        # Broker unreachable — fall back to cache invalidation so reads still refresh.
-        from app.cache import cache_delete
-
-        await cache_delete("tickets:*")
-        await cache_delete("agents:*")
-        await cache_delete("groups:*")
-        await cache_delete("kpi:*")
-        return ApiResponse(data={"triggered": False, "error": "celery unavailable, cache cleared"})
+    return await trigger_settings_sync(SyncTriggerIn(kind="full", source="manual"), current, db, redis)

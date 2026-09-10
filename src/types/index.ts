@@ -322,15 +322,34 @@ export interface SyncSchedules {
 }
 
 export interface SyncLastRun {
+  operation_id?: string;
   kind: "incremental" | "full";
+  source?: "manual" | "automatic" | "scheduled";
   triggered_by: string;
+  status: "queued" | "running" | "succeeded" | "failed" | "interrupted";
+  phase?: "queued" | "fetching_tickets" | "fetching_users" | "fetching_groups" | "syncing_histories" | "finalizing";
+  processed?: { tickets: number; users: number; groups: number; histories: number };
+  known_total?: number | null;
+  percentage?: number | null;
   tickets: number;
   users: number;
   groups: number;
   duration_secs: number;
-  started_at: string;
-  finished_at: string;
-  status: "succeeded" | "failed" | "interrupted";
+  queued_at?: string;
+  started_at: string | null;
+  finished_at: string | null;
+  renewed_at?: string;
+  lease_expires_at?: string;
+  error?: string | null;
+  partial_writes?: boolean;
+}
+
+export interface SyncTriggerResult {
+  triggered: boolean;
+  attached: boolean;
+  kind: "incremental" | "full";
+  operation: SyncLastRun | null;
+  error?: string;
 }
 
 export interface SyncFreshness {
@@ -349,6 +368,7 @@ export interface WorkerStatus {
 export interface SettingsBundle {
   schedules: SyncSchedules;
   last_run: SyncLastRun | null;
+  execution: SyncLastRun | null;
   latest_attempt: SyncLastRun | null;
   freshness: SyncFreshness;
   worker: WorkerStatus;
@@ -362,6 +382,7 @@ export interface SettingsStatus {
   worker: WorkerStatus;
   health: { redis: string; database: string; zammad: string };
   last_run: SyncLastRun | null;
+  execution: SyncLastRun | null;
   latest_attempt: SyncLastRun | null;
   freshness: SyncFreshness;
   now: string;

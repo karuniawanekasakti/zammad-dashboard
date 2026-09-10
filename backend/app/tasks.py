@@ -7,20 +7,24 @@ run's event loop, then disposes them — asyncpg/redis clients are loop-bound, s
 module-level pool shared across asyncio.run() invocations would leak across loops.
 """
 import asyncio
+import json
 from collections import Counter
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 from time import perf_counter
+from typing import Literal
 
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.celery_app import celery
 from app.config import settings
+from app.db_models import SettingRow
 from app.repositories import get_setting, set_setting
 from app.routers.agents import _group_ids, _map_agent
 from app.routers.groups import _map_group
 from app.routers.tickets import OPEN_STATES, _map_article, _map_history, _map_state, _map_ticket
+from app.sync_operation import HEARTBEAT_SECONDS, LEASE_SECONDS, acquire, owns_lease, owns_token, release, renew, utcnow
 from app.zammad_client import zammad
 
 SYNC_WATERMARK_KEY = "sync:last_ticket_updated_at"
@@ -127,7 +131,7 @@ async def _record_last_run(kind: str, counts: dict, started_wall: datetime, star
         pass  # telemetry write failure must not fail the sync
 
 
-async def run_incremental_sync() -> dict:
+async def run_incremental_sync(progress=None, record_run: bool = True, advance_watermark: bool = True) -> dict:
     """Pull tickets updated since the last sync watermark, upsert them."""
     from app.db_models import TicketRow
     from app.repositories import _upsert
@@ -139,6 +143,8 @@ async def run_incremental_sync() -> dict:
     async def _do(session_factory):
         nonlocal updated_since
         async with session_factory() as session:
+            if progress:
+                await progress("fetching_tickets")
             setting = await get_setting(session, SYNC_WATERMARK_KEY)
             if setting:
                 updated_since = setting.get("value")
@@ -147,24 +153,31 @@ async def run_incremental_sync() -> dict:
             for t in tickets:
                 await _upsert(session, TicketRow, t.model_dump())
             # Refresh history only for tickets that changed since the watermark.
-            await _sync_ticket_histories(session, [t["id"] for t in raw])
+            if progress:
+                await progress("syncing_histories", {"tickets": len(tickets)})
+            histories = await _sync_ticket_histories(session, [t["id"] for t in raw])
+            if progress:
+                await progress("finalizing", {"tickets": len(tickets), "histories": histories})
             await session.commit()
             # Advance watermark to now, not to a ticket's updated_at (a stale ticket
             # would pin the watermark to the past and stall future increments).
-            await set_setting(session, SYNC_WATERMARK_KEY, {"value": datetime.now(timezone.utc).isoformat()})
+            if advance_watermark:
+                await set_setting(session, SYNC_WATERMARK_KEY, {"value": datetime.now(timezone.utc).isoformat()})
         return len(tickets)
 
     try:
         count = await _with_engine(_do)
-        await _record_last_run("incremental", {"tickets": count}, started_wall, started_mono, "ok")
+        if record_run:
+            await _record_last_run("incremental", {"tickets": count}, started_wall, started_mono, "ok")
         await _invalidate_caches()
         return {"synced": count, "updated_since": updated_since}
     except Exception:
-        await _record_last_run("incremental", {}, started_wall, started_mono, "error")
+        if record_run:
+            await _record_last_run("incremental", {}, started_wall, started_mono, "error")
         raise
 
 
-async def run_full_sync() -> dict:
+async def run_full_sync(progress=None, record_run: bool = True, advance_watermark: bool = True) -> dict:
     """Full reconcile: tickets (all), users, groups."""
     from app.db_models import GroupRow, TicketRow, UserRow
     from app.repositories import _upsert
@@ -174,8 +187,14 @@ async def run_full_sync() -> dict:
     counts: dict = {}
 
     async def _do(session_factory):
+        if progress:
+            await progress("fetching_tickets")
         raw_tickets = await _with_sla_details(await zammad.get_all_tickets(per_page=100))
+        if progress:
+            await progress("fetching_users", {"tickets": len(raw_tickets)})
         raw_users = await zammad.get_users(per_page=200)
+        if progress:
+            await progress("fetching_groups", {"tickets": len(raw_tickets), "users": len(raw_users)})
         raw_groups = await zammad.get_groups()
 
         tickets = [_map_ticket(t) for t in raw_tickets]
@@ -191,20 +210,27 @@ async def run_full_sync() -> dict:
                 await _upsert(session, GroupRow, g.model_dump(mode="json"))
             # ponytail: one history call per ticket; this is the backfill path for
             # accurate open-at timestamps, so it's slow on first run by design.
-            await _sync_ticket_histories(session, [t["id"] for t in raw_tickets])
+            if progress:
+                await progress("syncing_histories", {"tickets": len(tickets), "users": len(users), "groups": len(groups)})
+            histories = await _sync_ticket_histories(session, [t["id"] for t in raw_tickets])
+            if progress:
+                await progress("finalizing", {"tickets": len(tickets), "users": len(users), "groups": len(groups), "histories": histories})
             await session.commit()
-            await set_setting(session, SYNC_WATERMARK_KEY, {"value": datetime.now(timezone.utc).isoformat()})
+            if advance_watermark:
+                await set_setting(session, SYNC_WATERMARK_KEY, {"value": datetime.now(timezone.utc).isoformat()})
 
         counts.update(tickets=len(tickets), users=len(users), groups=len(groups))
         return counts
 
     try:
         counts = await _with_engine(_do)
-        await _record_last_run("full", counts, started_wall, started_mono, "ok")
+        if record_run:
+            await _record_last_run("full", counts, started_wall, started_mono, "ok")
         await _invalidate_caches()
         return counts
     except Exception:
-        await _record_last_run("full", counts, started_wall, started_mono, "error")
+        if record_run:
+            await _record_last_run("full", counts, started_wall, started_mono, "error")
         raise
 
 
@@ -229,16 +255,187 @@ async def sync_ticket_core(ticket_id: int) -> dict | None:
     return await _with_engine(_do)
 
 
+# --- Managed operation lifecycle --------------------------------------------
+
+async def _write_operation(operation: dict, expected_operation_id: str | None = None) -> bool:
+    async def _do(session_factory):
+        async with session_factory() as session:
+            row = await session.get(SettingRow, LAST_RUN_KEY)
+            if expected_operation_id and (not row or row.value.get("operation_id") != expected_operation_id):
+                return False
+            if row:
+                row.value = operation
+            else:
+                session.add(SettingRow(key=LAST_RUN_KEY, value=operation))
+            await session.commit()
+            return True
+
+    return await _with_engine(_do)
+
+
+async def _operation_was_recorded(operation_id: str) -> bool:
+    async def _do(session_factory):
+        async with session_factory() as session:
+            row = await session.get(SettingRow, LAST_RUN_KEY)
+            return bool(row and row.value.get("operation_id") == operation_id)
+
+    return await _with_engine(_do)
+
+
+async def _record_managed_failure(operation: dict, exc: Exception) -> bool:
+    failed = dict(
+        operation,
+        status="failed",
+        finished_at=utcnow().isoformat(),
+        error=f"{str(exc)[:300]} Partial writes may have occurred.",
+        partial_writes=True,
+    )
+    return await _write_operation(failed, operation["operation_id"])
+
+
+async def _complete_operation(operation: dict) -> bool:
+    async def _do(session_factory):
+        async with session_factory() as session:
+            row = await session.get(SettingRow, LAST_RUN_KEY)
+            if not row or row.value.get("operation_id") != operation["operation_id"]:
+                return False
+            row.value = operation
+            value = {"value": operation["finished_at"]}
+            checkpoint = await session.get(SettingRow, LAST_SUCCESS_KEY)
+            watermark = await session.get(SettingRow, SYNC_WATERMARK_KEY)
+            if checkpoint:
+                checkpoint.value = value
+            else:
+                session.add(SettingRow(key=LAST_SUCCESS_KEY, value=value))
+            if watermark:
+                watermark.value = value
+            else:
+                session.add(SettingRow(key=SYNC_WATERMARK_KEY, value=value))
+            await session.commit()
+            return True
+
+    return await _with_engine(_do)
+
+
+async def _execute_managed_sync(*, kind: str, operation: dict, lease_value: str, redis: Redis, close_redis: bool = False) -> dict:
+    write_lock = asyncio.Lock()
+
+    async def update_operation(phase: str | None = None, processed: dict | None = None) -> None:
+        nonlocal lease_value
+        async with write_lock:
+            now = utcnow()
+            operation.update(
+                renewed_at=now.isoformat(),
+                lease_expires_at=datetime.fromtimestamp(now.timestamp() + LEASE_SECONDS, timezone.utc).isoformat(),
+            )
+            if phase:
+                operation["phase"] = phase
+            if processed:
+                operation["processed"] = {**operation["processed"], **processed}
+            renewed_value = await renew(redis, lease_value, operation)
+            if not renewed_value:
+                raise RuntimeError("sync operation lease ownership was lost")
+            lease_value = renewed_value
+            if not await _write_operation(operation, operation["operation_id"]):
+                raise RuntimeError("sync operation evidence was superseded")
+
+    async def progress(phase: str, processed: dict | None = None) -> None:
+        await update_operation(phase, processed)
+
+    async def heartbeat() -> None:
+        while True:
+            await asyncio.sleep(HEARTBEAT_SECONDS)
+            await update_operation()
+
+    operation.update(status="running", started_at=utcnow().isoformat())
+    started_mono = perf_counter()
+    heartbeat_task = None
+    sync_task = None
+    try:
+        await update_operation()
+        heartbeat_task = asyncio.create_task(heartbeat())
+        sync_task = asyncio.create_task(
+            run_full_sync(progress, record_run=False, advance_watermark=False)
+            if kind == "full"
+            else run_incremental_sync(progress, record_run=False, advance_watermark=False)
+        )
+        done, _pending = await asyncio.wait({sync_task, heartbeat_task}, return_when=asyncio.FIRST_COMPLETED)
+        if heartbeat_task in done:
+            heartbeat_task.result()
+        result = await sync_task
+        heartbeat_task.cancel()
+        await asyncio.gather(heartbeat_task, return_exceptions=True)
+        heartbeat_task = None
+        if not await owns_lease(redis, lease_value):
+            return {"skipped": True, "reason": "lease ownership lost"}
+        processed = dict(operation["processed"])
+        processed.update(result if kind == "full" else {"tickets": result["synced"]})
+        completed = dict(
+            operation,
+            status="succeeded",
+            phase="finalizing",
+            processed=processed,
+            tickets=processed.get("tickets", 0),
+            users=processed.get("users", 0),
+            groups=processed.get("groups", 0),
+            finished_at=utcnow().isoformat(),
+            duration_secs=round(perf_counter() - started_mono, 1),
+        )
+        if not await _complete_operation(completed):
+            return {"skipped": True, "reason": "operation evidence superseded"}
+        return result
+    except Exception as exc:
+        if sync_task and not sync_task.done():
+            sync_task.cancel()
+            await asyncio.gather(sync_task, return_exceptions=True)
+        if await owns_token(redis, lease_value):
+            await _record_managed_failure(operation, exc)
+        raise
+    finally:
+        if heartbeat_task:
+            heartbeat_task.cancel()
+            await asyncio.gather(heartbeat_task, return_exceptions=True)
+        await release(redis, lease_value)
+        if close_redis:
+            await redis.aclose()
+
+
+async def _run_managed_sync(
+    kind: Literal["incremental", "full"],
+    operation_id: str | None = None,
+    source: Literal["manual", "automatic", "scheduled"] = "scheduled",
+    lease_value: str | None = None,
+    redis: Redis | None = None,
+) -> dict:
+    close_redis = redis is None
+    redis = redis or Redis.from_url(settings.redis_url, decode_responses=True)
+    if lease_value:
+        operation = json.loads(lease_value)["operation"]
+        if not await owns_lease(redis, lease_value) or not await _operation_was_recorded(operation["operation_id"]):
+            if close_redis:
+                await redis.aclose()
+            return {"skipped": True, "reason": "obsolete operation"}
+    else:
+        claim = await acquire(redis, kind, source, operation_id=operation_id)
+        if not claim:
+            if close_redis:
+                await redis.aclose()
+            return {"skipped": True, "reason": "operation slot occupied"}
+        operation, lease_value = claim.operation, claim.lease_value
+        await _write_operation(operation)
+    return await _execute_managed_sync(kind=kind, operation=operation, lease_value=lease_value, redis=redis, close_redis=close_redis)
+
+
 # --- Celery tasks -----------------------------------------------------------
 
-@celery.task(name="app.tasks.sync_incremental", max_retries=3)
-def sync_incremental():
-    return asyncio.run(run_incremental_sync())
+@celery.task(name="app.tasks.sync_incremental", bind=True, max_retries=3)
+def sync_incremental(self, operation_id=None, source="scheduled", lease_value=None):
+    return asyncio.run(_run_managed_sync("incremental", operation_id or self.request.id, source, lease_value))
 
 
-@celery.task(name="app.tasks.sync_full_reconcile", max_retries=3)
-def sync_full_reconcile():
-    return asyncio.run(run_full_sync())
+@celery.task(name="app.tasks.sync_full_reconcile", bind=True, max_retries=3)
+def sync_full_reconcile(self, operation_id=None, source="scheduled", lease_value=None):
+    return asyncio.run(_run_managed_sync("full", operation_id or self.request.id, source, lease_value))
 
 
 @celery.task(name="app.tasks.sync_ticket", max_retries=3)

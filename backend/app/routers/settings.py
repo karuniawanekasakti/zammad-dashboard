@@ -7,11 +7,11 @@ from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.cache import cache_delete
 from app.config import settings as app_settings
 from app.deps import get_db, get_redis, require_roles
 from app.models import ApiResponse, Role
 from app.repositories import get_setting, set_setting
+from app.sync_operation import acquire, current as current_operation, new_operation, project
 from app.zammad_client import zammad
 
 router = APIRouter()
@@ -35,6 +35,7 @@ class SchedulesIn(BaseModel):
 
 class SyncTriggerIn(BaseModel):
     kind: Literal["incremental", "full"] = "incremental"
+    source: Literal["manual", "automatic"] = "manual"
 
 
 def _utcnow() -> datetime:
@@ -74,7 +75,7 @@ def _freshness(checkpoint: datetime | None, schedules: dict, now: datetime, chec
     }
 
 
-async def _sync_status(db: AsyncSession, now: datetime) -> dict:
+async def _sync_status(db: AsyncSession, now: datetime, redis=None) -> dict:
     schedules = (await get_setting(db, SCHEDULES_KEY)) or DEFAULT_SCHEDULES
     checkpoint_setting = await get_setting(db, LAST_SUCCESS_KEY)
     checkpoint_source = "dedicated"
@@ -82,11 +83,22 @@ async def _sync_status(db: AsyncSession, now: datetime) -> dict:
         checkpoint_setting = await get_setting(db, SYNC_WATERMARK_KEY)
         checkpoint_source = "watermark" if checkpoint_setting else None
     checkpoint = _parse_datetime(checkpoint_setting.get("value") if checkpoint_setting else None)
+    latest_attempt = _normalize_last_run(await get_setting(db, LAST_RUN_KEY))
+    active = await current_operation(redis, latest_attempt, now=now) if redis else None
+    projected_attempt = project(active or latest_attempt, now)
+    execution = active if active and projected_attempt.get("status") in {"queued", "running"} else None
     return {
         "freshness": _freshness(checkpoint, schedules, now, checkpoint_source),
-        "latest_attempt": _normalize_last_run(await get_setting(db, LAST_RUN_KEY)),
+        "execution": execution,
+        "latest_attempt": projected_attempt,
         "now": now.isoformat(),
     }
+
+
+def _sync_tasks(kind: str):
+    from app.tasks import sync_full_reconcile, sync_incremental
+
+    return sync_full_reconcile if kind == "full" else sync_incremental
 
 
 def _get_worker_status() -> dict:
@@ -121,9 +133,13 @@ async def _get_health(db: AsyncSession) -> dict:
 
 
 @router.get("", response_model=ApiResponse)
-async def get_settings(current: Annotated[dict, Depends(require_roles(Role.admin))], db: Annotated[AsyncSession, Depends(get_db)]):
+async def get_settings(
+    current: Annotated[dict, Depends(require_roles(Role.admin))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    redis=Depends(get_redis),
+):
     schedules = (await get_setting(db, SCHEDULES_KEY)) or DEFAULT_SCHEDULES
-    sync_status = await _sync_status(db, _utcnow())
+    sync_status = await _sync_status(db, _utcnow(), redis)
     return ApiResponse(
         data={
             "schedules": schedules,
@@ -148,21 +164,53 @@ async def update_schedules(payload: SchedulesIn, current: Annotated[dict, Depend
 
 
 @router.post("/sync", response_model=ApiResponse)
-async def trigger_sync(payload: SyncTriggerIn, current: Annotated[dict, Depends(require_roles(Role.admin))]):
+async def trigger_sync(
+    payload: SyncTriggerIn,
+    current: Annotated[dict, Depends(require_roles(Role.admin))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    redis=Depends(get_redis),
+):
+    now = _utcnow()
     try:
-        from app.tasks import sync_full_reconcile, sync_incremental
-
-        if payload.kind == "full":
-            sync_full_reconcile.delay()
-        else:
-            sync_incremental.delay()
-        return ApiResponse(data={"triggered": True, "kind": payload.kind})
+        claim = await acquire(redis, payload.kind, payload.source, now=now)
     except Exception:
-        await cache_delete("tickets:*")
-        await cache_delete("agents:*")
-        await cache_delete("groups:*")
-        await cache_delete("kpi:*")
-        return ApiResponse(data={"triggered": False, "kind": payload.kind, "error": "celery unavailable, cache cleared"})
+        operation, _lease_value = new_operation(payload.kind, payload.source, now=now)
+        failed = dict(
+            operation,
+            status="failed",
+            finished_at=now.isoformat(),
+            error="The sync operation slot is unavailable.",
+        )
+        try:
+            await set_setting(db, LAST_RUN_KEY, failed)
+        except Exception:
+            pass
+        return ApiResponse(data={"triggered": False, "attached": False, "kind": payload.kind, "operation": failed, "error": failed["error"]})
+    if not claim:
+        active = await current_operation(redis, now=now)
+        if active:
+            return ApiResponse(data={"triggered": False, "attached": True, "kind": payload.kind, "operation": active})
+        return ApiResponse(data={"triggered": False, "attached": False, "kind": payload.kind, "operation": None, "error": "sync operation unavailable"})
+
+    try:
+        await set_setting(db, LAST_RUN_KEY, claim.operation)
+        _sync_tasks(payload.kind).delay(claim.operation["operation_id"], payload.source, claim.lease_value)
+        return ApiResponse(data={"triggered": True, "attached": False, "kind": payload.kind, "operation": claim.operation})
+    except Exception:
+        from app.sync_operation import release
+
+        failed = dict(
+            claim.operation,
+            status="failed",
+            finished_at=_utcnow().isoformat(),
+            error="The sync worker could not be queued.",
+        )
+        try:
+            await set_setting(db, LAST_RUN_KEY, failed)
+        except Exception:
+            pass
+        await release(redis, claim.lease_value)
+        return ApiResponse(data={"triggered": False, "attached": False, "kind": payload.kind, "operation": failed, "error": failed["error"]})
 
 
 @router.post("/cache/purge", response_model=ApiResponse)
@@ -180,8 +228,12 @@ async def purge_cache(current: Annotated[dict, Depends(require_roles(Role.admin)
 
 
 @router.get("/status", response_model=ApiResponse)
-async def status(current: Annotated[dict, Depends(require_roles(Role.admin))], db: Annotated[AsyncSession, Depends(get_db)]):
-    sync_status = await _sync_status(db, _utcnow())
+async def status(
+    current: Annotated[dict, Depends(require_roles(Role.admin))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    redis=Depends(get_redis),
+):
+    sync_status = await _sync_status(db, _utcnow(), redis)
     return ApiResponse(
         data={
             "worker": _get_worker_status(),

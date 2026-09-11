@@ -11,6 +11,17 @@ OPERATION_KEY = "sync:operation:lease"
 LEASE_SECONDS = 600
 HEARTBEAT_SECONDS = 30
 INTERRUPTED_ERROR = "The worker lease expired before completion. Partial writes may have occurred."
+RUNNING_PHASES = (
+    "fetching_tickets",
+    "fetching_users",
+    "fetching_groups",
+    "syncing_histories",
+    "finalizing",
+)
+PHASES_BY_KIND = {
+    "incremental": ("fetching_tickets", "syncing_histories", "finalizing"),
+    "full": RUNNING_PHASES,
+}
 
 _RENEW = """
 if redis.call('get', KEYS[1]) == ARGV[1] then
@@ -150,6 +161,25 @@ def project(operation: dict | None, now: datetime | None = None) -> dict | None:
 
 def public(operation: dict | None) -> dict | None:
     return dict(operation) if operation else None
+
+
+def with_progress(
+    operation: dict,
+    phase: str,
+    processed: dict | None = None,
+    *,
+    completed: int | None = None,
+    known_total: int | None = None,
+) -> dict:
+    if phase not in PHASES_BY_KIND[operation["kind"]]:
+        raise ValueError(f"invalid {operation['kind']} sync phase: {phase}")
+    progressed = dict(operation, phase=phase, processed={**operation["processed"], **(processed or {})})
+    progressed.pop("known_total", None)
+    progressed.pop("percentage", None)
+    progressed.pop("completed", None)
+    if known_total is not None and known_total > 0 and completed is not None:
+        progressed.update(completed=completed, known_total=known_total, percentage=min(100, round(completed * 100 / known_total)))
+    return progressed
 
 
 def _parse_datetime(value: str | None) -> datetime | None:

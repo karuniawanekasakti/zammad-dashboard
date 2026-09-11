@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2, PlugZap, RefreshCw, Shield, Save, Database, Server, AlertTriangle, CheckCircle, XCircle, Clock, Zap } from "lucide-react";
 import { format, formatDistanceToNow } from "date-fns";
@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
+import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
@@ -23,8 +24,9 @@ export default function SettingsPage() {
   const statusQuery = useQuery({
     queryKey: statusKey,
     queryFn: () => api.getSettingsStatus(),
-    refetchInterval: (query) => query.state.data?.execution ? 2000 : 30000,
+    refetchInterval: (query) => query.state.error || !query.state.data?.execution ? 30000 : 2000,
   });
+  const previousExecution = useRef<string | null>(null);
 
   const s = settings.data;
   const [confirmFull, setConfirmFull] = useState(false);
@@ -76,23 +78,40 @@ export default function SettingsPage() {
 
   const st = statusQuery.data;
   const syncStatus = st ?? s;
-  const statusUnavailable = statusQuery.isError;
+  const statusUnavailable = Boolean(statusQuery.error);
+  useEffect(() => {
+    const operationId = st?.execution?.operation_id ?? null;
+    if (previousExecution.current && !operationId) {
+      qc.invalidateQueries({ queryKey: settingsKey });
+    }
+    previousExecution.current = operationId;
+  }, [qc, st?.execution?.operation_id]);
   const freshness = syncStatus?.freshness;
   const execution = syncStatus?.execution;
   const latestAttempt = syncStatus?.latest_attempt;
   const activeLabel = execution
     ? `${execution.kind === "full" ? "Full Reconcile" : "Incremental Sync"} · ${execution.source ?? execution.triggered_by}`
     : null;
+  const phaseLabels = {
+    queued: "Queued",
+    fetching_tickets: "Fetching tickets",
+    fetching_users: "Fetching users",
+    fetching_groups: "Fetching groups",
+    syncing_histories: "Syncing histories",
+    finalizing: "Finalizing",
+  } as const;
+  const phaseLabel = execution?.phase ? phaseLabels[execution.phase] : execution?.status;
   const syncBusy = Boolean(execution) || statusUnavailable || triggerIncremental.isPending || triggerFull.isPending;
-  const freshnessLabel = statusUnavailable ? "Status Unavailable" : {
+  const freshnessLabel = statusUnavailable ? "Status unavailable" : {
     never_synced: "Never Synced",
     up_to_date: "Up to Date",
     out_of_date: "Out of Date",
   }[freshness?.status ?? "never_synced"];
   const freshnessVariant = statusUnavailable ? "destructive" : freshness?.status === "up_to_date" ? "success" : freshness?.status === "out_of_date" ? "warning" : "secondary";
 
-  const healthBadge = (v: string) =>
-    v === "ok" ? <Badge variant="success">Online</Badge> : <Badge variant="destructive">Down</Badge>;
+  const healthBadge = (v: string) => statusUnavailable
+    ? <Badge variant="secondary">Status unavailable</Badge>
+    : v === "ok" ? <Badge variant="success">Online</Badge> : <Badge variant="destructive">Down</Badge>;
 
   return (
     <div className="space-y-4">
@@ -120,15 +139,17 @@ export default function SettingsPage() {
             <p className="text-xs text-muted-foreground">Sync execution</p>
             {execution ? (
               <div className="flex items-center gap-2">
-                <Badge variant="warning">{execution.status === "queued" ? "Queued" : execution.kind === "full" ? "Running Full Reconcile" : "Running Incremental Sync"}</Badge>
+                <Badge variant="warning">{statusUnavailable ? "Status unavailable" : execution.status === "queued" ? "Queued" : execution.kind === "full" ? "Running Full Reconcile" : "Running Incremental Sync"}</Badge>
                 <span className="text-xs text-muted-foreground capitalize">{execution.source ?? execution.triggered_by}</span>
               </div>
             ) : (
-              <Badge variant="secondary">Idle</Badge>
+              <Badge variant="secondary">{statusUnavailable ? "Status unavailable" : "Idle"}</Badge>
             )}
+            {statusUnavailable && <p className="text-xs text-destructive">Last-known execution may be stale; current state is unknown.</p>}
           </div>
           <div className="space-y-1">
             <p className="text-xs text-muted-foreground">Latest sync attempt</p>
+            {statusUnavailable && <p className="text-xs text-destructive">Status unavailable · last-known outcome</p>}
             {latestAttempt ? (
               <div className="flex items-center gap-2">
                 <Badge variant={latestAttempt.status === "succeeded" ? "success" : latestAttempt.status === "failed" ? "destructive" : "warning"}>
@@ -245,14 +266,19 @@ export default function SettingsPage() {
               {activeLabel && <p className="text-xs text-muted-foreground">Controls are disabled while {activeLabel} is active.</p>}
 
               {execution && (
-                <div className="rounded-md border p-3 text-sm">
+                <div className="space-y-2 rounded-md border p-3 text-sm">
                   <div className="flex items-center gap-2">
-                    <Loader2 className="size-4 animate-spin" />
-                    <span className="font-medium">{execution.phase?.replace(/_/g, " ") ?? execution.status}</span>
+                    {execution.percentage == null && <Loader2 className="size-4 animate-spin" />}
+                    <span className="font-medium">{phaseLabel}</span>
+                    {execution.percentage != null && <span className="ml-auto tabular-nums">{execution.percentage}%</span>}
                   </div>
-                  <p className="mt-1 text-xs text-muted-foreground">
+                  {execution.percentage != null && (
+                    <Progress value={execution.percentage} aria-label={`${phaseLabel} ${execution.percentage}%`} />
+                  )}
+                  <p className="text-xs text-muted-foreground">
                     Tickets {execution.processed?.tickets ?? 0} · Users {execution.processed?.users ?? 0} · Groups {execution.processed?.groups ?? 0} · Histories {execution.processed?.histories ?? 0}
                   </p>
+                  {execution.known_total != null && <p className="text-xs text-muted-foreground">Phase items {execution.completed ?? 0} of {execution.known_total}</p>}
                   {execution.lease_expires_at && <p className="text-xs text-muted-foreground">Lease expires {format(new Date(execution.lease_expires_at), "PPp")}</p>}
                 </div>
               )}
@@ -313,7 +339,9 @@ export default function SettingsPage() {
           <Card>
             <CardHeader>
               <CardTitle className="text-base flex items-center gap-2"><Server className="size-4" /> System Health</CardTitle>
-              <CardDescription>Live status of dependencies. Auto-refreshes every 30 s.</CardDescription>
+              <CardDescription>
+                Dependency snapshot {syncStatus?.health.snapshot_at ? formatDistanceToNow(new Date(syncStatus.health.snapshot_at), { addSuffix: true }) : "unavailable"}. Execution refreshes every 2 s during sync; dependency probes are reused for up to 15 s.
+              </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid gap-4 md:grid-cols-3">
@@ -351,9 +379,11 @@ export default function SettingsPage() {
                   <div>
                     <p className="text-sm font-medium">Celery Workers (sync queue)</p>
                     <p className="text-xs text-muted-foreground">
-                      {st?.worker?.reachable ?? s?.worker?.reachable ? "Reachable" : "Unreachable"}
+                      {statusUnavailable ? "Last-known evidence" : st?.worker?.reachable ?? s?.worker?.reachable ? "Reachable" : "Unreachable"}
                     </p>
-                    {st?.worker?.reachable ? (
+                    {statusUnavailable ? (
+                      <Badge variant="secondary">Status unavailable</Badge>
+                    ) : st?.worker?.reachable ?? s?.worker?.reachable ? (
                       <Badge variant="success">Online</Badge>
                     ) : (
                       <Badge variant="destructive">Offline</Badge>

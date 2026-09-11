@@ -24,7 +24,7 @@ from app.repositories import get_setting, set_setting
 from app.routers.agents import _group_ids, _map_agent
 from app.routers.groups import _map_group
 from app.routers.tickets import OPEN_STATES, _map_article, _map_history, _map_state, _map_ticket
-from app.sync_operation import HEARTBEAT_SECONDS, LEASE_SECONDS, acquire, owns_lease, owns_token, release, renew, utcnow
+from app.sync_operation import HEARTBEAT_SECONDS, LEASE_SECONDS, acquire, owns_lease, owns_token, release, renew, utcnow, with_progress
 from app.zammad_client import zammad
 
 SYNC_WATERMARK_KEY = "sync:last_ticket_updated_at"
@@ -55,7 +55,7 @@ async def _with_sla_details(raw_tickets: list[dict]) -> list[dict]:
     return rows
 
 
-async def _sync_ticket_histories(session, ticket_ids: list[int]) -> int:
+async def _sync_ticket_histories(session, ticket_ids: list[int], progress=None) -> int:
     """Fetch each ticket's history from Zammad and upsert the entries.
 
     One HTTP call per ticket (Zammad has no bulk history endpoint); failures are
@@ -66,7 +66,7 @@ async def _sync_ticket_histories(session, ticket_ids: list[int]) -> int:
     from app.repositories import _upsert
 
     synced = 0
-    for ticket_id in ticket_ids:
+    for completed, ticket_id in enumerate(ticket_ids, 1):
         try:
             rows = _map_history(await zammad.get_ticket_history(ticket_id), ticket_id)
             for row in rows:
@@ -77,8 +77,10 @@ async def _sync_ticket_histories(session, ticket_ids: list[int]) -> int:
             await session.commit()
         except Exception:
             await session.rollback()
-            continue
-        synced += 1
+        else:
+            synced += 1
+        if progress:
+            await progress(synced, completed, len(ticket_ids))
     return synced
 
 
@@ -155,7 +157,12 @@ async def run_incremental_sync(progress=None, record_run: bool = True, advance_w
             # Refresh history only for tickets that changed since the watermark.
             if progress:
                 await progress("syncing_histories", {"tickets": len(tickets)})
-            histories = await _sync_ticket_histories(session, [t["id"] for t in raw])
+
+            async def history_progress(synced: int, completed: int, total: int) -> None:
+                if progress:
+                    await progress("syncing_histories", {"histories": synced}, completed, total)
+
+            histories = await _sync_ticket_histories(session, [t["id"] for t in raw], history_progress)
             if progress:
                 await progress("finalizing", {"tickets": len(tickets), "histories": histories})
             await session.commit()
@@ -210,11 +217,17 @@ async def run_full_sync(progress=None, record_run: bool = True, advance_watermar
                 await _upsert(session, GroupRow, g.model_dump(mode="json"))
             # ponytail: one history call per ticket; this is the backfill path for
             # accurate open-at timestamps, so it's slow on first run by design.
+            processed = {"tickets": len(tickets), "users": len(users), "groups": len(groups)}
             if progress:
-                await progress("syncing_histories", {"tickets": len(tickets), "users": len(users), "groups": len(groups)})
-            histories = await _sync_ticket_histories(session, [t["id"] for t in raw_tickets])
+                await progress("syncing_histories", processed)
+
+            async def history_progress(synced: int, completed: int, total: int) -> None:
+                if progress:
+                    await progress("syncing_histories", {"histories": synced}, completed, total)
+
+            histories = await _sync_ticket_histories(session, [t["id"] for t in raw_tickets], history_progress)
             if progress:
-                await progress("finalizing", {"tickets": len(tickets), "users": len(users), "groups": len(groups), "histories": histories})
+                await progress("finalizing", {**processed, "histories": histories})
             await session.commit()
             if advance_watermark:
                 await set_setting(session, SYNC_WATERMARK_KEY, {"value": datetime.now(timezone.utc).isoformat()})
@@ -320,8 +333,13 @@ async def _complete_operation(operation: dict) -> bool:
 async def _execute_managed_sync(*, kind: str, operation: dict, lease_value: str, redis: Redis, close_redis: bool = False) -> dict:
     write_lock = asyncio.Lock()
 
-    async def update_operation(phase: str | None = None, processed: dict | None = None) -> None:
-        nonlocal lease_value
+    async def update_operation(
+        phase: str | None = None,
+        processed: dict | None = None,
+        completed: int | None = None,
+        known_total: int | None = None,
+    ) -> None:
+        nonlocal lease_value, operation
         async with write_lock:
             now = utcnow()
             operation.update(
@@ -329,9 +347,7 @@ async def _execute_managed_sync(*, kind: str, operation: dict, lease_value: str,
                 lease_expires_at=datetime.fromtimestamp(now.timestamp() + LEASE_SECONDS, timezone.utc).isoformat(),
             )
             if phase:
-                operation["phase"] = phase
-            if processed:
-                operation["processed"] = {**operation["processed"], **processed}
+                operation = with_progress(operation, phase, processed, completed=completed, known_total=known_total)
             renewed_value = await renew(redis, lease_value, operation)
             if not renewed_value:
                 raise RuntimeError("sync operation lease ownership was lost")
@@ -339,8 +355,13 @@ async def _execute_managed_sync(*, kind: str, operation: dict, lease_value: str,
             if not await _write_operation(operation, operation["operation_id"]):
                 raise RuntimeError("sync operation evidence was superseded")
 
-    async def progress(phase: str, processed: dict | None = None) -> None:
-        await update_operation(phase, processed)
+    async def progress(
+        phase: str,
+        processed: dict | None = None,
+        completed: int | None = None,
+        known_total: int | None = None,
+    ) -> None:
+        await update_operation(phase, processed, completed, known_total)
 
     async def heartbeat() -> None:
         while True:
@@ -371,9 +392,8 @@ async def _execute_managed_sync(*, kind: str, operation: dict, lease_value: str,
         processed = dict(operation["processed"])
         processed.update(result if kind == "full" else {"tickets": result["synced"]})
         completed = dict(
-            operation,
+            with_progress(operation, "finalizing", processed),
             status="succeeded",
-            phase="finalizing",
             processed=processed,
             tickets=processed.get("tickets", 0),
             users=processed.get("users", 0),

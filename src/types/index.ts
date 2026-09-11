@@ -330,6 +330,7 @@ export interface SyncLastRun {
   phase?: "queued" | "fetching_tickets" | "fetching_users" | "fetching_groups" | "syncing_histories" | "finalizing";
   processed?: { tickets: number; users: number; groups: number; histories: number };
   known_total?: number | null;
+  completed?: number | null;
   percentage?: number | null;
   tickets: number;
   users: number;
@@ -363,6 +364,14 @@ export interface WorkerStatus {
   reachable: boolean;
   workers: Record<string, string>[];
   error?: string;
+  snapshot_at: string;
+}
+
+export interface DependencyHealth {
+  redis: string;
+  database: string;
+  zammad: string;
+  snapshot_at: string;
 }
 
 export interface SettingsBundle {
@@ -372,7 +381,7 @@ export interface SettingsBundle {
   latest_attempt: SyncLastRun | null;
   freshness: SyncFreshness;
   worker: WorkerStatus;
-  health: { redis: string; database: string; zammad: string };
+  health: DependencyHealth;
   zammad_base_url: string;
   data_retention_days: number;
   now: string;
@@ -380,7 +389,7 @@ export interface SettingsBundle {
 
 export interface SettingsStatus {
   worker: WorkerStatus;
-  health: { redis: string; database: string; zammad: string };
+  health: DependencyHealth;
   last_run: SyncLastRun | null;
   execution: SyncLastRun | null;
   latest_attempt: SyncLastRun | null;

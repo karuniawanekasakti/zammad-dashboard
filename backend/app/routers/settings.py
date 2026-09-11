@@ -1,5 +1,7 @@
 """Admin settings: Celery/worker config, manual sync triggers, health monitoring."""
+import asyncio
 from datetime import datetime, timedelta, timezone
+from time import monotonic
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends
@@ -21,6 +23,8 @@ LAST_RUN_KEY = "sync:last_run"
 LAST_SUCCESS_KEY = "sync:last_successful_checkpoint"
 SYNC_WATERMARK_KEY = "sync:last_ticket_updated_at"
 FRESHNESS_GRACE_SECONDS = 120
+PROBE_CACHE_SECONDS = 15
+_probe_snapshot: dict | None = None
 
 MIN_SECONDS = 30
 MAX_SECONDS = 86400 * 7
@@ -132,6 +136,24 @@ async def _get_health(db: AsyncSession) -> dict:
     }
 
 
+async def _get_probes(db: AsyncSession, now: datetime, operation_key: tuple | None) -> dict:
+    global _probe_snapshot
+    if (
+        _probe_snapshot
+        and _probe_snapshot["operation_key"] == operation_key
+        and monotonic() - _probe_snapshot["created_mono"] < PROBE_CACHE_SECONDS
+    ):
+        return _probe_snapshot["data"]
+    worker, health = await asyncio.gather(asyncio.to_thread(_get_worker_status), _get_health(db))
+    snapshot_at = now.isoformat()
+    data = {
+        "worker": {**worker, "snapshot_at": snapshot_at},
+        "health": {**health, "snapshot_at": snapshot_at},
+    }
+    _probe_snapshot = {"operation_key": operation_key, "created_mono": monotonic(), "data": data}
+    return data
+
+
 @router.get("", response_model=ApiResponse)
 async def get_settings(
     current: Annotated[dict, Depends(require_roles(Role.admin))],
@@ -139,14 +161,16 @@ async def get_settings(
     redis=Depends(get_redis),
 ):
     schedules = (await get_setting(db, SCHEDULES_KEY)) or DEFAULT_SCHEDULES
-    sync_status = await _sync_status(db, _utcnow(), redis)
+    now = _utcnow()
+    sync_status = await _sync_status(db, now, redis)
+    attempt = sync_status["latest_attempt"] or {}
+    probes = await _get_probes(db, now, (attempt.get("operation_id"), attempt.get("status")))
     return ApiResponse(
         data={
             "schedules": schedules,
             "last_run": sync_status["latest_attempt"],
             **sync_status,
-            "worker": _get_worker_status(),
-            "health": await _get_health(db),
+            **probes,
             "zammad_base_url": app_settings.zammad_base_url,
             "data_retention_days": 30,
         }
@@ -233,11 +257,13 @@ async def status(
     db: Annotated[AsyncSession, Depends(get_db)],
     redis=Depends(get_redis),
 ):
-    sync_status = await _sync_status(db, _utcnow(), redis)
+    now = _utcnow()
+    sync_status = await _sync_status(db, now, redis)
+    attempt = sync_status["latest_attempt"] or {}
+    probes = await _get_probes(db, now, (attempt.get("operation_id"), attempt.get("status")))
     return ApiResponse(
         data={
-            "worker": _get_worker_status(),
-            "health": await _get_health(db),
+            **probes,
             "last_run": sync_status["latest_attempt"],
             **sync_status,
         }

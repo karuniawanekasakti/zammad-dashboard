@@ -285,6 +285,47 @@ function mockSearchTickets(rows: Ticket[], query: string): Ticket[] {
 
 let mockSyncOperation: SyncLastRun | null = null;
 
+function mockSyncStatus(now: Date) {
+  const snapshotAt = now.toISOString();
+  const staleAfter = mockSettings.last_success_at
+    ? new Date(new Date(mockSettings.last_success_at).getTime() + (mockSettings.schedules.incremental_seconds + 120) * 1000)
+    : null;
+  const freshness = {
+    status: !mockSettings.last_success_at ? "never_synced" as const : now <= staleAfter! ? "up_to_date" as const : "out_of_date" as const,
+    last_success_at: mockSettings.last_success_at,
+    ...(staleAfter ? { stale_after: staleAfter.toISOString() } : {}),
+    checkpoint_source: mockSettings.last_success_at ? "dedicated" as const : null,
+  };
+  const worker = { reachable: mockSettings.worker_reachable, workers: [] as string[], snapshot_at: snapshotAt };
+  const health = { redis: "ok", database: "ok", zammad: systemSettings.zammad_online ? "ok" : "down", snapshot_at: snapshotAt };
+  const requiredKind = freshness.status === "never_synced" ? "full" as const : freshness.status === "out_of_date" ? "incremental" as const : null;
+  const blockers = [
+    ...(mockSyncOperation ? ["sync_operation_active"] : []),
+    ...(health.zammad !== "ok" ? ["zammad_unavailable"] : []),
+    ...(!worker.reachable ? ["sync_worker_unavailable"] : []),
+  ];
+  const latestAttempt = mockSettings.last_run;
+  let nextEligibleAt: string | null = null;
+  if (latestAttempt?.status === "failed" && (latestAttempt.source ?? latestAttempt.triggered_by) === "automatic" && latestAttempt.finished_at) {
+    const next = new Date(new Date(latestAttempt.finished_at).getTime() + mockSettings.schedules.incremental_seconds * 1000);
+    if (now < next) {
+      blockers.push("automatic_failure_cooldown");
+      nextEligibleAt = next.toISOString();
+    }
+  }
+  return {
+    schedules: { ...mockSettings.schedules },
+    last_run: latestAttempt,
+    execution: mockSyncOperation,
+    latest_attempt: latestAttempt,
+    freshness,
+    worker,
+    health,
+    automatic: { eligible: requiredKind !== null && blockers.length === 0, required_kind: requiredKind, blockers, next_eligible_at: nextEligibleAt },
+    now: snapshotAt,
+  };
+}
+
 const mockApi = {
   // Auth --------------------------------------------------------------------
   async login(login: string, _password: string): Promise<User> {
@@ -597,25 +638,10 @@ const mockApi = {
 
   // Settings / admin -----------------------------------------------------------
   async getSettings(): Promise<SettingsBundle> {
-    const now = new Date();
-    const snapshotAt = now.toISOString();
-    const staleAfter = new Date(new Date(mockSettings.last_success_at).getTime() + (mockSettings.schedules.incremental_seconds + 120) * 1000);
     return delay({
-      schedules: { ...mockSettings.schedules },
-      last_run: mockSettings.last_run,
-      execution: mockSyncOperation,
-      latest_attempt: mockSettings.last_run,
-      freshness: {
-        status: now <= staleAfter ? "up_to_date" as const : "out_of_date" as const,
-        last_success_at: mockSettings.last_success_at,
-        stale_after: staleAfter.toISOString(),
-        checkpoint_source: "dedicated" as const,
-      },
-      worker: { reachable: true, workers: [], snapshot_at: snapshotAt },
-      health: { redis: "ok", database: "ok", zammad: systemSettings.zammad_online ? "ok" : "down", snapshot_at: snapshotAt },
+      ...mockSyncStatus(new Date()),
       zammad_base_url: systemSettings.zammad_base_url,
       data_retention_days: systemSettings.data_retention_days,
-      now: now.toISOString(),
     });
   },
 
@@ -625,6 +651,11 @@ const mockApi = {
   },
 
   async triggerSyncByKind(kind: "incremental" | "full", source: "manual" | "automatic" = "manual"): Promise<SyncTriggerResult> {
+    if (mockSyncOperation) return delay({ triggered: false, attached: true, kind, operation: mockSyncOperation }, 100);
+    const automatic = mockSyncStatus(new Date()).automatic;
+    if (source === "automatic" && (!automatic.eligible || automatic.required_kind !== kind)) {
+      return delay({ triggered: false, attached: false, kind, operation: null, automatic }, 100);
+    }
     const now = new Date();
     const operation: SyncLastRun = {
       operation_id: uuid("sync", Date.now()),
@@ -656,32 +687,17 @@ const mockApi = {
 
   async getSettingsStatus(): Promise<SettingsStatus> {
     const now = new Date();
-    const snapshotAt = now.toISOString();
     if (mockSyncOperation?.known_total) {
       const completed = Math.min(mockSyncOperation.known_total, (mockSyncOperation.completed ?? 0) + Math.ceil(mockSyncOperation.known_total / 4));
       mockSyncOperation = { ...mockSyncOperation, completed, percentage: Math.round(completed * 100 / mockSyncOperation.known_total), processed: { ...mockSyncOperation.processed!, histories: completed } };
       mockSettings.last_run = mockSyncOperation;
       if (completed === mockSyncOperation.known_total) {
-        mockSettings.last_run = { ...mockSyncOperation, status: "succeeded", phase: "finalizing", finished_at: snapshotAt, duration_secs: 8, completed: undefined, known_total: undefined, percentage: undefined };
-        mockSettings.last_success_at = snapshotAt;
+        mockSettings.last_run = { ...mockSyncOperation, status: "succeeded", phase: "finalizing", finished_at: now.toISOString(), duration_secs: 8, completed: undefined, known_total: undefined, percentage: undefined };
+        mockSettings.last_success_at = now.toISOString();
         mockSyncOperation = null;
       }
     }
-    const staleAfter = new Date(new Date(mockSettings.last_success_at).getTime() + (mockSettings.schedules.incremental_seconds + 120) * 1000);
-    return delay({
-      worker: { reachable: true, workers: [], snapshot_at: snapshotAt },
-      health: { redis: "ok", database: "ok", zammad: systemSettings.zammad_online ? "ok" : "down", snapshot_at: snapshotAt },
-      last_run: mockSettings.last_run,
-      execution: mockSyncOperation,
-      latest_attempt: mockSettings.last_run,
-      freshness: {
-        status: now <= staleAfter ? "up_to_date" : "out_of_date",
-        last_success_at: mockSettings.last_success_at,
-        stale_after: staleAfter.toISOString(),
-        checkpoint_source: "dedicated",
-      },
-      now: now.toISOString(),
-    });
+    return delay(mockSyncStatus(now));
   },
 };
 

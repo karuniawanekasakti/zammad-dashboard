@@ -15,6 +15,9 @@ import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
+const syncKindLabel = (kind: "incremental" | "full") => kind === "full" ? "Full Reconcile" : "Incremental Sync";
+const sourceLabel = (source: string) => source.charAt(0).toUpperCase() + source.slice(1);
+
 export default function SettingsPage() {
   const qc = useQueryClient();
 
@@ -27,6 +30,7 @@ export default function SettingsPage() {
     refetchInterval: (query) => query.state.error || !query.state.data?.execution ? 30000 : 2000,
   });
   const previousExecution = useRef<string | null>(null);
+  const automaticRequest = useRef<string | null>(null);
 
   const s = settings.data;
   const [confirmFull, setConfirmFull] = useState(false);
@@ -48,7 +52,7 @@ export default function SettingsPage() {
   const handleTriggerResult = (result: Awaited<ReturnType<typeof api.triggerSyncByKind>>) => {
     if (result.error) toast.error(result.error);
     else if (result.attached) toast.info("Attached to the active sync operation");
-    else toast.success(result.kind === "full" ? "Full Reconcile queued" : "Incremental Sync queued");
+    else if (result.triggered) toast.success(result.kind === "full" ? "Full Reconcile queued" : "Incremental Sync queued");
     qc.invalidateQueries({ queryKey: statusKey });
   };
 
@@ -67,6 +71,19 @@ export default function SettingsPage() {
     onError: (e: Error) => toast.error(`Failed: ${e.message}`),
   });
 
+  const triggerAutomatic = useMutation({
+    mutationFn: (kind: "incremental" | "full") => api.triggerSyncByKind(kind, "automatic"),
+    onSuccess: (result) => {
+      if (!result.triggered && !result.attached) automaticRequest.current = null;
+      handleTriggerResult(result);
+    },
+    onError: (e: Error) => {
+      automaticRequest.current = null;
+      qc.invalidateQueries({ queryKey: statusKey });
+      toast.error(`Automatic sync failed: ${e.message}`);
+    },
+  });
+
   const purgeCache = useMutation({
     mutationFn: () => api.purgeCache(),
     onSuccess: (res) => {
@@ -78,7 +95,7 @@ export default function SettingsPage() {
 
   const st = statusQuery.data;
   const syncStatus = st ?? s;
-  const statusUnavailable = Boolean(statusQuery.error);
+  const statusUnavailable = !statusQuery.isSuccess;
   useEffect(() => {
     const operationId = st?.execution?.operation_id ?? null;
     if (previousExecution.current && !operationId) {
@@ -86,11 +103,18 @@ export default function SettingsPage() {
     }
     previousExecution.current = operationId;
   }, [qc, st?.execution?.operation_id]);
+  useEffect(() => {
+    if (!statusQuery.isSuccess || !st?.automatic.eligible || !st.automatic.required_kind) return;
+    const key = `${st.automatic.required_kind}:${st.freshness.last_success_at ?? "never"}:${st.latest_attempt?.operation_id ?? "none"}`;
+    if (automaticRequest.current === key) return;
+    automaticRequest.current = key;
+    triggerAutomatic.mutate(st.automatic.required_kind);
+  }, [st?.automatic, st?.freshness.last_success_at, st?.latest_attempt?.operation_id, statusQuery.isSuccess]);
   const freshness = syncStatus?.freshness;
   const execution = syncStatus?.execution;
   const latestAttempt = syncStatus?.latest_attempt;
   const activeLabel = execution
-    ? `${execution.kind === "full" ? "Full Reconcile" : "Incremental Sync"} · ${execution.source ?? execution.triggered_by}`
+    ? `${syncKindLabel(execution.kind)} · ${sourceLabel(execution.source ?? execution.triggered_by)}`
     : null;
   const phaseLabels = {
     queued: "Queued",
@@ -101,7 +125,7 @@ export default function SettingsPage() {
     finalizing: "Finalizing",
   } as const;
   const phaseLabel = execution?.phase ? phaseLabels[execution.phase] : execution?.status;
-  const syncBusy = Boolean(execution) || statusUnavailable || triggerIncremental.isPending || triggerFull.isPending;
+  const syncBusy = Boolean(execution) || statusUnavailable;
   const freshnessLabel = statusUnavailable ? "Status unavailable" : {
     never_synced: "Never Synced",
     up_to_date: "Up to Date",
@@ -140,7 +164,7 @@ export default function SettingsPage() {
             {execution ? (
               <div className="flex items-center gap-2">
                 <Badge variant="warning">{statusUnavailable ? "Status unavailable" : execution.status === "queued" ? "Queued" : execution.kind === "full" ? "Running Full Reconcile" : "Running Incremental Sync"}</Badge>
-                <span className="text-xs text-muted-foreground capitalize">{execution.source ?? execution.triggered_by}</span>
+                <span className="text-xs text-muted-foreground">{sourceLabel(execution.source ?? execution.triggered_by)}</span>
               </div>
             ) : (
               <Badge variant="secondary">{statusUnavailable ? "Status unavailable" : "Idle"}</Badge>
@@ -156,7 +180,7 @@ export default function SettingsPage() {
                   {latestAttempt.status === "queued" ? "Queued" : latestAttempt.status === "running" ? "Running" : latestAttempt.status === "succeeded" ? "Succeeded" : latestAttempt.status === "failed" ? "Failed" : "Interrupted"}
                 </Badge>
                 <span className="text-xs text-muted-foreground capitalize">
-                  {latestAttempt.kind === "full" ? "Full Reconcile" : "Incremental Sync"} · {latestAttempt.triggered_by}
+                  {syncKindLabel(latestAttempt.kind)} · {sourceLabel(latestAttempt.source ?? latestAttempt.triggered_by)}
                 </span>
               </div>
             ) : (
@@ -251,7 +275,7 @@ export default function SettingsPage() {
                   title={statusUnavailable ? "Disabled while sync status is unavailable" : activeLabel ? `Disabled while ${activeLabel} is active` : undefined}
                 >
                   {triggerIncremental.isPending ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
-                  Trigger Incremental
+                  Trigger Incremental Sync
                 </Button>
                 <Button
                   variant="destructive"
@@ -264,6 +288,9 @@ export default function SettingsPage() {
                 </Button>
               </div>
               {activeLabel && <p className="text-xs text-muted-foreground">Controls are disabled while {activeLabel} is active.</p>}
+              {!statusUnavailable && syncStatus?.automatic.blockers.includes("automatic_failure_cooldown") && syncStatus.automatic.next_eligible_at && (
+                <p className="text-xs text-destructive">Automatic Incremental Sync paused after failure until {format(new Date(syncStatus.automatic.next_eligible_at), "PPp")}. Manual retry remains available.</p>
+              )}
 
               {execution && (
                 <div className="space-y-2 rounded-md border p-3 text-sm">
@@ -288,8 +315,8 @@ export default function SettingsPage() {
               <div className="grid gap-4 md:grid-cols-3">
                 <div className="space-y-1 p-3 rounded border">
                   <p className="text-xs text-muted-foreground">Last Run</p>
-                  <p className="font-medium">{latestAttempt?.kind ? latestAttempt.kind.charAt(0).toUpperCase() + latestAttempt.kind.slice(1) : "—"}</p>
-                  <p className="text-xs text-muted-foreground">Triggered by: {latestAttempt?.triggered_by ?? "—"}</p>
+                  <p className="font-medium">{latestAttempt?.kind ? syncKindLabel(latestAttempt.kind) : "—"}</p>
+                  <p className="text-xs text-muted-foreground">Triggered by: {latestAttempt ? sourceLabel(latestAttempt.source ?? latestAttempt.triggered_by) : "—"}</p>
                 </div>
                 <div className="space-y-1 p-3 rounded border">
                   <p className="text-xs text-muted-foreground">Tickets / Users / Groups</p>
@@ -407,9 +434,9 @@ export default function SettingsPage() {
               {latestAttempt ? (
                 <dl className="grid grid-cols-2 gap-4 text-sm">
                   <dt className="text-muted-foreground">Kind</dt>
-                  <dd className="font-medium capitalize">{latestAttempt.kind}</dd>
+                  <dd className="font-medium">{syncKindLabel(latestAttempt.kind)}</dd>
                   <dt className="text-muted-foreground">Triggered By</dt>
-                  <dd className="font-medium">{latestAttempt.triggered_by}</dd>
+                  <dd className="font-medium">{sourceLabel(latestAttempt.source ?? latestAttempt.triggered_by)}</dd>
                   <dt className="text-muted-foreground">Status</dt>
                   <dd className="font-medium">
                     {latestAttempt.status === "succeeded" ? (

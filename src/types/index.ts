@@ -350,6 +350,7 @@ export interface SyncTriggerResult {
   attached: boolean;
   kind: "incremental" | "full";
   operation: SyncLastRun | null;
+  automatic?: AutomaticSyncStatus;
   error?: string;
 }
 
@@ -360,9 +361,16 @@ export interface SyncFreshness {
   checkpoint_source: "dedicated" | "watermark" | null;
 }
 
+export interface AutomaticSyncStatus {
+  eligible: boolean;
+  required_kind: "incremental" | "full" | null;
+  blockers: string[];
+  next_eligible_at: string | null;
+}
+
 export interface WorkerStatus {
   reachable: boolean;
-  workers: Record<string, string>[];
+  workers: string[];
   error?: string;
   snapshot_at: string;
 }
@@ -380,6 +388,7 @@ export interface SettingsBundle {
   execution: SyncLastRun | null;
   latest_attempt: SyncLastRun | null;
   freshness: SyncFreshness;
+  automatic: AutomaticSyncStatus;
   worker: WorkerStatus;
   health: DependencyHealth;
   zammad_base_url: string;
@@ -394,6 +403,8 @@ export interface SettingsStatus {
   execution: SyncLastRun | null;
   latest_attempt: SyncLastRun | null;
   freshness: SyncFreshness;
+  automatic: AutomaticSyncStatus;
+  schedules: SyncSchedules;
   now: string;
 }
 

@@ -702,6 +702,7 @@ export const systemSettings: SystemSettings = {
 
 export const mockSettings = {
   schedules: { incremental_seconds: 300, full_reconcile_seconds: 21600 } as SyncSchedules,
+  worker_reachable: true,
   last_run: {
     kind: "incremental",
     triggered_by: "beat",
@@ -713,7 +714,7 @@ export const mockSettings = {
     finished_at: new Date().toISOString(),
     status: "succeeded",
   } as SyncLastRun,
-  last_success_at: new Date().toISOString(),
+  last_success_at: new Date().toISOString() as string | null,
 };
 
 // -- Exposed mutation helpers (for mock write ops) ---------------------------

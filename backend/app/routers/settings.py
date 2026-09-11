@@ -79,6 +79,35 @@ def _freshness(checkpoint: datetime | None, schedules: dict, now: datetime, chec
     }
 
 
+def _automatic_status(sync_status: dict, probes: dict, now: datetime) -> dict:
+    freshness = sync_status["freshness"]["status"]
+    required_kind = "full" if freshness == "never_synced" else "incremental" if freshness == "out_of_date" else None
+    blockers = []
+    next_eligible_at = None
+    if sync_status["execution"]:
+        blockers.append("sync_operation_active")
+    if probes["health"].get("zammad") != "ok":
+        blockers.append("zammad_unavailable")
+    if not probes["worker"].get("reachable"):
+        blockers.append("sync_worker_unavailable")
+
+    latest_attempt = sync_status["latest_attempt"] or {}
+    if latest_attempt.get("status") == "failed" and (latest_attempt.get("source") or latest_attempt.get("triggered_by")) == "automatic":
+        finished_at = _parse_datetime(latest_attempt.get("finished_at"))
+        if finished_at:
+            next_eligible = finished_at + timedelta(seconds=sync_status["schedules"]["incremental_seconds"])
+            if now < next_eligible:
+                blockers.append("automatic_failure_cooldown")
+                next_eligible_at = next_eligible.isoformat()
+
+    return {
+        "eligible": required_kind is not None and not blockers,
+        "required_kind": required_kind,
+        "blockers": blockers,
+        "next_eligible_at": next_eligible_at,
+    }
+
+
 async def _sync_status(db: AsyncSession, now: datetime, redis=None) -> dict:
     schedules = (await get_setting(db, SCHEDULES_KEY)) or DEFAULT_SCHEDULES
     checkpoint_setting = await get_setting(db, LAST_SUCCESS_KEY)
@@ -92,6 +121,7 @@ async def _sync_status(db: AsyncSession, now: datetime, redis=None) -> dict:
     projected_attempt = project(active or latest_attempt, now)
     execution = active if active and projected_attempt.get("status") in {"queued", "running"} else None
     return {
+        "schedules": schedules,
         "freshness": _freshness(checkpoint, schedules, now, checkpoint_source),
         "execution": execution,
         "latest_attempt": projected_attempt,
@@ -106,13 +136,13 @@ def _sync_tasks(kind: str):
 
 
 def _get_worker_status() -> dict:
-    """Ping the Celery 'sync' queue for reachable workers."""
+    """Find reachable workers that consume the Celery sync queue."""
     try:
         from app.celery_app import celery
 
-        responses = celery.control.ping(timeout=3)
-        workers = [r for resp in responses for r in resp]
-        return {"reachable": True, "workers": workers}
+        queues = celery.control.inspect(timeout=3).active_queues() or {}
+        workers = [worker for worker, active in queues.items() if any(queue.get("name") == "sync" for queue in active)]
+        return {"reachable": bool(workers), "workers": workers}
     except Exception as exc:
         return {"reachable": False, "workers": [], "error": str(exc)}
 
@@ -160,17 +190,16 @@ async def get_settings(
     db: Annotated[AsyncSession, Depends(get_db)],
     redis=Depends(get_redis),
 ):
-    schedules = (await get_setting(db, SCHEDULES_KEY)) or DEFAULT_SCHEDULES
     now = _utcnow()
     sync_status = await _sync_status(db, now, redis)
     attempt = sync_status["latest_attempt"] or {}
     probes = await _get_probes(db, now, (attempt.get("operation_id"), attempt.get("status")))
     return ApiResponse(
         data={
-            "schedules": schedules,
             "last_run": sync_status["latest_attempt"],
             **sync_status,
             **probes,
+            "automatic": _automatic_status(sync_status, probes, now),
             "zammad_base_url": app_settings.zammad_base_url,
             "data_retention_days": 30,
         }
@@ -196,6 +225,15 @@ async def trigger_sync(
 ):
     now = _utcnow()
     try:
+        if payload.source == "automatic":
+            sync_status = await _sync_status(db, now, redis)
+            if sync_status["execution"]:
+                return ApiResponse(data={"triggered": False, "attached": True, "kind": payload.kind, "operation": sync_status["execution"]})
+            attempt = sync_status["latest_attempt"] or {}
+            probes = await _get_probes(db, now, (attempt.get("operation_id"), attempt.get("status")))
+            automatic = _automatic_status(sync_status, probes, now)
+            if not automatic["eligible"] or payload.kind != automatic["required_kind"]:
+                return ApiResponse(data={"triggered": False, "attached": False, "kind": payload.kind, "operation": None, "automatic": automatic})
         claim = await acquire(redis, payload.kind, payload.source, now=now)
     except Exception:
         operation, _lease_value = new_operation(payload.kind, payload.source, now=now)
@@ -266,5 +304,6 @@ async def status(
             **probes,
             "last_run": sync_status["latest_attempt"],
             **sync_status,
+            "automatic": _automatic_status(sync_status, probes, now),
         }
     )

@@ -201,6 +201,24 @@ async def main() -> None:
     )
     assert result == {"skipped": True, "reason": "obsolete operation"}
 
+    assert not tasks._incremental_sync_is_due(now.isoformat(), 300, now + timedelta(seconds=299))
+    assert tasks._incremental_sync_is_due(now.isoformat(), 300, now + timedelta(seconds=300))
+
+    async def recent_success(_now):
+        return False
+
+    tasks._scheduled_incremental_sync_is_due = recent_success
+    redis = FakeRedis()
+    called = False
+    result = await tasks._run_managed_sync(
+        "incremental",
+        operation_id="scheduled-after-success",
+        source="scheduled",
+        redis=redis,
+    )
+    assert result == {"skipped": True, "reason": "recent successful sync"}
+    assert called is False, "a scheduled tick must not restart immediately after a successful sync"
+
     values[settings.LAST_RUN_KEY] = expired
     redis.value = None
     status = await settings._sync_status(object(), now, redis)

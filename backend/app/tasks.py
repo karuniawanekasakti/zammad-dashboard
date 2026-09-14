@@ -10,7 +10,7 @@ import asyncio
 import json
 from collections import Counter
 from collections.abc import Awaitable, Callable
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from time import perf_counter
 from typing import Literal
 
@@ -30,6 +30,7 @@ from app.zammad_client import zammad
 SYNC_WATERMARK_KEY = "sync:last_ticket_updated_at"
 LAST_RUN_KEY = "sync:last_run"
 LAST_SUCCESS_KEY = "sync:last_successful_checkpoint"
+SCHEDULES_KEY = "sync:schedules"
 
 
 def _map_groups(raw_groups: list[dict], raw_users: list[dict]):
@@ -329,6 +330,32 @@ async def _complete_operation(operation: dict) -> bool:
 
     return await _with_engine(_do)
 
+def _incremental_sync_is_due(checkpoint_value: str | None, interval_seconds: int, now: datetime) -> bool:
+    if not checkpoint_value:
+        return True
+    try:
+        checkpoint = datetime.fromisoformat(checkpoint_value.replace("Z", "+00:00"))
+    except ValueError:
+        return True
+    checkpoint = checkpoint.replace(tzinfo=checkpoint.tzinfo or timezone.utc)
+    return now >= checkpoint + timedelta(seconds=interval_seconds)
+
+
+async def _scheduled_incremental_sync_is_due(now: datetime) -> bool:
+    async def _do(session_factory):
+        async with session_factory() as session:
+            checkpoint = await get_setting(session, LAST_SUCCESS_KEY)
+            schedules = await get_setting(session, SCHEDULES_KEY) or {}
+            return _incremental_sync_is_due(
+                checkpoint.get("value") if checkpoint else None,
+                int(schedules.get("incremental_seconds", 300)),
+                now,
+            )
+
+    return await _with_engine(_do)
+
+
+
 
 async def _execute_managed_sync(*, kind: str, operation: dict, lease_value: str, redis: Redis, close_redis: bool = False) -> dict:
     write_lock = asyncio.Lock()
@@ -427,6 +454,8 @@ async def _run_managed_sync(
     lease_value: str | None = None,
     redis: Redis | None = None,
 ) -> dict:
+    if kind == "incremental" and source == "scheduled" and not lease_value and not await _scheduled_incremental_sync_is_due(utcnow()):
+        return {"skipped": True, "reason": "recent successful sync"}
     close_redis = redis is None
     redis = redis or Redis.from_url(settings.redis_url, decode_responses=True)
     if lease_value:

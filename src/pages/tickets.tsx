@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
+import { useHref } from "react-router-dom";
 import type { PaginationState, VisibilityState } from "@tanstack/react-table";
 import { api } from "@/lib/api";
 import { useScope } from "@/stores/auth";
@@ -50,7 +50,10 @@ function downloadTicketsCsv(rows: Ticket[]) {
 }
 
 export default function TicketsPage() {
-  const nav = useNavigate();
+  const ticketsHref = useHref("/tickets");
+  const openTicket = useCallback((ticket: Ticket) => {
+    window.open(`${ticketsHref}/${ticket.id}`, "_blank", "noopener,noreferrer");
+  }, [ticketsHref]);
   const scope = useScope();
   const scopeKey = `${scope.role}:${scope.user_id}:${scope.group_ids.join(",")}`;
   const [search, setSearch] = useState("");
@@ -139,7 +142,7 @@ export default function TicketsPage() {
             groups={groups.data ?? []}
             agents={agents.data ?? []}
             isLoading={tickets.isLoading}
-            onView={(ticket) => nav(`/tickets/${ticket.id}`)}
+            onView={openTicket}
             onExport={() => downloadTicketsCsv(tickets.data?.rows ?? EMPTY_TICKETS)}
           />
         </CardContent>

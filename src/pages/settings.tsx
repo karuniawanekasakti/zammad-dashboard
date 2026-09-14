@@ -107,7 +107,10 @@ export default function SettingsPage() {
 
   const st = statusQuery.data;
   const syncStatus = st ?? s;
-  const statusUnavailable = !statusQuery.isSuccess;
+  // "Unavailable" means the status call failed. A query that has not answered
+  // yet is merely loading: treating it as unavailable disabled every trigger
+  // and flashed a destructive badge on each page load.
+  const statusUnavailable = statusQuery.isError;
   useEffect(() => {
     const operationId = st?.execution?.operation_id ?? null;
     if (previousExecution.current && !operationId) {

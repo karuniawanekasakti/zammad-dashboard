@@ -333,7 +333,7 @@ export default function SettingsPage() {
                 <div className="space-y-1 p-3 rounded border">
                   <p className="text-xs text-muted-foreground">Tickets / Users / Groups</p>
                   <p className="font-medium">
-                    {latestAttempt?.tickets ?? 0} / {latestAttempt?.users ?? 0} / {latestAttempt?.groups ?? 0}
+                    {latestAttempt?.tickets ?? 0} / {latestAttempt?.kind === "incremental" ? "—" : (latestAttempt?.users ?? 0)} / {latestAttempt?.kind === "incremental" ? "—" : (latestAttempt?.groups ?? 0)}
                   </p>
                 </div>
                 <div className="space-y-1 p-3 rounded border">
@@ -466,7 +466,7 @@ export default function SettingsPage() {
                   <dt className="text-muted-foreground">Finished</dt>
                   <dd className="font-medium">{latestAttempt.finished_at ? format(new Date(latestAttempt.finished_at), "PPp") : "—"}</dd>
                   <dt className="text-muted-foreground">Tickets / Users / Groups</dt>
-                  <dd className="font-medium">{latestAttempt.processed?.tickets ?? latestAttempt.tickets ?? 0} / {latestAttempt.processed?.users ?? latestAttempt.users ?? 0} / {latestAttempt.processed?.groups ?? latestAttempt.groups ?? 0}</dd>
+                  <dd className="font-medium">{latestAttempt.processed?.tickets ?? latestAttempt.tickets ?? 0} / {latestAttempt.kind === "incremental" ? "—" : (latestAttempt.processed?.users ?? latestAttempt.users ?? 0)} / {latestAttempt.kind === "incremental" ? "—" : (latestAttempt.processed?.groups ?? latestAttempt.groups ?? 0)}</dd>
                   {latestAttempt.error && (
                     <>
                       <dt className="text-muted-foreground">Error</dt>

@@ -6,6 +6,16 @@ from fastapi import HTTPException, status
 from app.config import settings
 
 
+def _search_query(updated_since: str) -> str:
+    """Build the Zammad search query for an incremental watermark.
+
+    This Zammad silently returns [] for a query whose datetime carries a
+    timezone offset ("+00:00") or "Z" suffix, so the watermark is sent at
+    date granularity. All writes are upserts, so the wider window is safe.
+    """
+    return f"updated_at:>{updated_since[:10]}"
+
+
 class ZammadClient:
     def __init__(self):
         self._base = settings.zammad_base_url.rstrip("/")
@@ -38,7 +48,7 @@ class ZammadClient:
             path = "/api/v1/tickets/search" if updated_since else "/api/v1/tickets"
             params: dict = {"page": page, "expand": "true", "limit" if updated_since else "per_page": per_page}
             if updated_since:
-                params["query"] = f"updated_at:>{updated_since}"
+                params["query"] = _search_query(updated_since)
             r = await c.get(path, params=params)
             r.raise_for_status()
             return r.json()
@@ -50,7 +60,7 @@ class ZammadClient:
             for page in range(1, max_pages + 1):
                 params: dict = {"page": page, "expand": "true", "limit" if updated_since else "per_page": per_page}
                 if updated_since:
-                    params["query"] = f"updated_at:>{updated_since}"
+                    params["query"] = _search_query(updated_since)
                 r = await c.get(path, params=params)
                 r.raise_for_status()
                 rows = r.json()

@@ -105,7 +105,25 @@ async def _invalidate_caches() -> None:
         await r.aclose()
 
 
-async def _record_last_run(kind: str, counts: dict, started_wall: datetime, started_mono: float, status: str) -> None:
+def _run_duration_secs(queued_at: str | None, finished_at: str) -> float:
+    """Wall-clock run duration, so it always matches started_at/finished_at.
+
+    A monotonic timer started inside the worker misses the queue wait and the
+    operation-record write, and drifts from the timestamps the UI shows.
+    """
+    try:
+        start = datetime.fromisoformat((queued_at or finished_at).replace("Z", "+00:00"))
+        end = datetime.fromisoformat(finished_at.replace("Z", "+00:00"))
+    except ValueError:
+        return 0.0
+    if start.tzinfo is None:
+        start = start.replace(tzinfo=timezone.utc)
+    if end.tzinfo is None:
+        end = end.replace(tzinfo=timezone.utc)
+    return round(max((end - start).total_seconds(), 0.0), 1)
+
+
+async def _record_last_run(kind: str, counts: dict, started_wall: datetime, started_mono: float, status: str, source: str = "scheduled") -> None:
     """Write sync-run telemetry and advance freshness only on success."""
     async def _do(session_factory):
         async with session_factory() as session:
@@ -115,7 +133,8 @@ async def _record_last_run(kind: str, counts: dict, started_wall: datetime, star
                 LAST_RUN_KEY,
                 {
                     "kind": kind,
-                    "triggered_by": "beat",
+                    "source": source,
+                    "triggered_by": source,
                     "tickets": counts.get("tickets", 0),
                     "users": counts.get("users", 0),
                     "groups": counts.get("groups", 0),
@@ -396,7 +415,7 @@ async def _execute_managed_sync(*, kind: str, operation: dict, lease_value: str,
             await update_operation()
 
     operation.update(status="running", started_at=utcnow().isoformat())
-    started_mono = perf_counter()
+    queued_at = operation.get("queued_at")
     heartbeat_task = None
     sync_task = None
     try:
@@ -418,6 +437,7 @@ async def _execute_managed_sync(*, kind: str, operation: dict, lease_value: str,
             return {"skipped": True, "reason": "lease ownership lost"}
         processed = dict(operation["processed"])
         processed.update(result if kind == "full" else {"tickets": result["synced"]})
+        finished_at = utcnow().isoformat()
         completed = dict(
             with_progress(operation, "finalizing", processed),
             status="succeeded",
@@ -425,8 +445,8 @@ async def _execute_managed_sync(*, kind: str, operation: dict, lease_value: str,
             tickets=processed.get("tickets", 0),
             users=processed.get("users", 0),
             groups=processed.get("groups", 0),
-            finished_at=utcnow().isoformat(),
-            duration_secs=round(perf_counter() - started_mono, 1),
+            finished_at=finished_at,
+            duration_secs=_run_duration_secs(queued_at, finished_at),
         )
         if not await _complete_operation(completed):
             return {"skipped": True, "reason": "operation evidence superseded"}

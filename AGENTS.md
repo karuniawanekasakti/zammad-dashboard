@@ -1,6 +1,6 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to AI Agents Code when working with code in this repository.
 
 ## Overview
 
@@ -89,9 +89,9 @@ docker compose exec api python check_ticket_sorting.py  # monkeypatches tickets.
 docker compose exec api python check_sync_telemetry.py  # sync summary: watermark, source, duration
 ```
 
-`check_ticket_sorting.py` is the pattern for testing router logic without a DB: patch `cache_get`/`cache_set`/`zammad` module attributes on `app.routers.tickets`, call the endpoint function directly, `assert` on the result, run with `python`.
-
 `check_sync_telemetry.py` covers the Settings sync summary: it asserts the incremental watermark reaches Zammad at date granularity (a `+00:00`/`Z` suffix makes this Zammad return `[]` silently), that a managed run records its real `source` rather than a hardcoded one, and that `duration_secs` spans the whole run.
+
+`check_ticket_sorting.py` is the pattern for testing router logic without a DB: patch `cache_get`/`cache_set`/`zammad` module attributes on `app.routers.tickets`, call the endpoint function directly, `assert` on the result, run with `python`.
 
 ## Not implemented yet (per PRD)
 

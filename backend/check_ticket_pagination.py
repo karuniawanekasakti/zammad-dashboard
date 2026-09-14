@@ -36,7 +36,9 @@ async def main() -> None:
     client._client = lambda: httpx.AsyncClient(transport=httpx.MockTransport(search_handler), base_url="https://zammad.test")  # type: ignore[method-assign]
     await client.get_all_tickets(per_page=25, updated_since="2026-09-14T06:37:08Z")
     assert requests[0].url.path == "/api/v1/tickets/search"
-    assert requests[0].url.params["query"] == "updated_at:>2026-09-14T06:37:08Z"
+    # A timezone suffix (Z or +00:00) makes this Zammad return [] for the same
+    # tickets, so the watermark must reach it at date granularity.
+    assert requests[0].url.params["query"] == "updated_at:>2026-09-14"
     assert requests[0].url.params["limit"] == "25"
 
 

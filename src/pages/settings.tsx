@@ -14,9 +14,21 @@ import { Separator } from "@/components/ui/separator";
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import type { SettingsStatus } from "@/types";
 
 const syncKindLabel = (kind: "incremental" | "full") => kind === "full" ? "Full Reconcile" : "Incremental Sync";
 const sourceLabel = (source: string) => source.charAt(0).toUpperCase() + source.slice(1);
+
+export const automaticSyncRequest = (
+  status: Partial<Pick<SettingsStatus, "automatic" | "freshness" | "latest_attempt">> | undefined,
+  previousKey: string | null,
+) => {
+  const automatic = status?.automatic;
+  const freshness = status?.freshness;
+  if (!automatic?.eligible || !automatic.required_kind || !freshness) return null;
+  const key = `${automatic.required_kind}:${freshness.last_success_at ?? "never"}:${status?.latest_attempt?.operation_id ?? "none"}`;
+  return previousKey === key ? null : { key, kind: automatic.required_kind };
+};
 
 export default function SettingsPage() {
   const qc = useQueryClient();
@@ -104,12 +116,12 @@ export default function SettingsPage() {
     previousExecution.current = operationId;
   }, [qc, st?.execution?.operation_id]);
   useEffect(() => {
-    if (!statusQuery.isSuccess || !st?.automatic.eligible || !st.automatic.required_kind) return;
-    const key = `${st.automatic.required_kind}:${st.freshness.last_success_at ?? "never"}:${st.latest_attempt?.operation_id ?? "none"}`;
-    if (automaticRequest.current === key) return;
-    automaticRequest.current = key;
-    triggerAutomatic.mutate(st.automatic.required_kind);
-  }, [st?.automatic, st?.freshness.last_success_at, st?.latest_attempt?.operation_id, statusQuery.isSuccess]);
+    if (!statusQuery.isSuccess) return;
+    const request = automaticSyncRequest(st, automaticRequest.current);
+    if (!request) return;
+    automaticRequest.current = request.key;
+    triggerAutomatic.mutate(request.kind);
+  }, [st?.automatic, st?.freshness?.last_success_at, st?.latest_attempt?.operation_id, statusQuery.isSuccess]);
   const freshness = syncStatus?.freshness;
   const execution = syncStatus?.execution;
   const latestAttempt = syncStatus?.latest_attempt;
@@ -288,7 +300,7 @@ export default function SettingsPage() {
                 </Button>
               </div>
               {activeLabel && <p className="text-xs text-muted-foreground">Controls are disabled while {activeLabel} is active.</p>}
-              {!statusUnavailable && syncStatus?.automatic.blockers.includes("automatic_failure_cooldown") && syncStatus.automatic.next_eligible_at && (
+              {!statusUnavailable && syncStatus?.automatic?.blockers.includes("automatic_failure_cooldown") && syncStatus.automatic.next_eligible_at && (
                 <p className="text-xs text-destructive">Automatic Incremental Sync paused after failure until {format(new Date(syncStatus.automatic.next_eligible_at), "PPp")}. Manual retry remains available.</p>
               )}
 

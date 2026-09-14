@@ -50,6 +50,26 @@ The **actionable deadline** is Zammad's current escalation deadline, or otherwis
 
 **Current compliance** is `(monitored - breached) / monitored`; Warning and Critical remain compliant until breach, and the rate is undefined when there are no monitored tickets. An **SLA-evidenced terminal outcome** is a terminal (`closed` or `merged`) ticket for which Zammad retained at least one evaluated milestone result: any missed milestone makes the outcome breached, otherwise it is closed on time. **Historical compliance** uses only these outcomes in the selected authorized group and priority scope.
 
+## Synchronization
+
+**Data freshness** describes whether the synchronized dataset has a successful
+checkpoint within its promised cadence. It is **Never Synced**, **Up to Date**,
+or **Out of Date**; when freshness cannot be established, it is **Status
+Unavailable**.
+
+**Sync execution** describes current work independently from Data freshness. It
+is **Idle**, **Queued**, **Running Incremental Sync**, or **Running Full
+Reconcile**.
+
+The **Latest sync attempt** is the retained outcome and evidence for the newest
+synchronization attempt. A completed attempt is **Succeeded**, **Failed**, or
+**Interrupted**.
+
+An **Incremental Sync** refreshes records changed since the successful
+checkpoint. An **Automatic Incremental Sync** is an Incremental Sync requested
+without administrator action when the dataset is Out of Date. A **Full
+Reconcile** establishes or refreshes the complete synchronized dataset.
+
 ## Release
 
 A **release** is an immutable, annotated Git tag on the `master` branch named

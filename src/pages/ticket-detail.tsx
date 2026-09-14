@@ -33,30 +33,11 @@ const ICONS = {
 
 const SESSION_WINDOW_MS = 3 * 60 * 1000;
 
-// A ticket detail page shows at most TICKET_HISTORY_EVENTS_PER_HOUR history
-// events per hour bucket, so a busy ticket does not force one endless scroll.
-// "Load More" reveals another event in every hour that still has one hidden.
-// Zammad renders history for the viewer's timezone, so buckets use local hours.
-export const TICKET_HISTORY_EVENTS_PER_HOUR = 3;
-
-export function historyHourStart(time: number) {
-  const date = new Date(time);
-  date.setMinutes(0, 0, 0);
-  return date.getTime();
-}
-
-export function historyByHour<T extends { time: number }>(events: T[]) {
-  return events.reduce<{ hour: number; events: T[] }[]>((buckets, event) => {
-    const hour = historyHourStart(event.time);
-    const last = buckets[buckets.length - 1];
-    if (last?.hour === hour) {
-      last.events.push(event);
-      return buckets;
-    }
-    buckets.push({ hour, events: [event] });
-    return buckets;
-  }, []);
-}
+// A ticket detail page shows TICKET_HISTORY_GROUPS_PER_PAGE history groups at
+// a time, so a busy ticket does not force the reader through one endless
+// scroll. "Load More" appends the next page of groups without dropping the
+// ones already on screen.
+export const TICKET_HISTORY_GROUPS_PER_PAGE = 3;
 
 const FILTERS = [
   { key: "all", label: "All" },
@@ -359,20 +340,17 @@ export function TicketHistoryTimeline({
   const [filter, setFilter] = useState<TimelineFilter>("all");
   const [sortDir, setSortDir] = useState<"desc" | "asc">("desc");
   const [expandedNotifications, setExpandedNotifications] = useState<Record<string, boolean>>({});
-  const [clicks, setClicks] = useState(0);
+  const [pages, setPages] = useState(1);
 
   const events = useMemo(() => history.map(normalizeHistory).sort((a, b) => sortDir === "desc" ? b.time - a.time : a.time - b.time), [history, sortDir]);
   const filteredEvents = filter === "all" ? events : events.filter((event) => filterKind(event.kind) === filter);
 
-  // Each hour bucket is capped at the reader's current allowance; events are
-  // taken within each hour so a crowded hour never hides a quiet one.
-  const shownPerHour = Math.min(clicks + 1, TICKET_HISTORY_EVENTS_PER_HOUR);
-  const hours = useMemo(() => historyByHour(filteredEvents), [filteredEvents]);
-  const visibleEvents = useMemo(
-    () => hours.flatMap((bucket) => bucket.events.slice(0, shownPerHour)),
-    [hours, shownPerHour],
-  );
-  const groups = useMemo(() => groupTimelineEvents(visibleEvents), [visibleEvents]);
+  // Groups, not events, are the unit of pagination: each group is one
+  // timestamped card, and a card is never split across pages. Switching filter
+  // or sort order starts the reader back at the first page.
+  const allGroups = useMemo(() => groupTimelineEvents(filteredEvents), [filteredEvents]);
+  const groups = useMemo(() => allGroups.slice(0, pages * TICKET_HISTORY_GROUPS_PER_PAGE), [allGroups, pages]);
+  const visibleEvents = useMemo(() => groups.flatMap((group) => group.events), [groups]);
   const hiddenCount = filteredEvents.length - visibleEvents.length;
 
   if (loading) {
@@ -391,9 +369,8 @@ export function TicketHistoryTimeline({
               key={item.key}
               type="button"
               size="sm"
-              variant={filter === item.key ? "default" : "outline"}
+              onClick={() => { setFilter(item.key); setPages(1); }}
               className="h-8 rounded-full px-3 text-xs"
-              onClick={() => { setFilter(item.key); setClicks(0); }}
             >
               {item.label}
             </Button>
@@ -402,9 +379,8 @@ export function TicketHistoryTimeline({
         <Button
           type="button"
           size="sm"
-          variant="outline"
+          onClick={() => { setSortDir((value) => value === "desc" ? "asc" : "desc"); setPages(1); }}
           className="h-8 gap-1 rounded-full px-3 text-xs"
-          onClick={() => setSortDir((value) => value === "desc" ? "asc" : "desc")}
         >
           <ArrowDownUp className="size-3.5" />
           {sortDir === "desc" ? "Newest first" : "Oldest first"}
@@ -454,7 +430,7 @@ export function TicketHistoryTimeline({
       {filteredEvents.length > 0 && (
         <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-4 text-xs text-muted-foreground">
           <span>
-            Showing {visibleEvents.length} of {filteredEvents.length} history events · up to {TICKET_HISTORY_EVENTS_PER_HOUR} per hour
+            Showing {visibleEvents.length} of {filteredEvents.length} history events
           </span>
           {hiddenCount > 0 && (
             <Button
@@ -462,12 +438,12 @@ export function TicketHistoryTimeline({
               size="sm"
               variant="outline"
               className="h-8 gap-1 rounded-full px-3 text-xs"
-              onClick={() => setClicks((value) => value + 1)}
+              onClick={() => setPages((value) => value + 1)}
             >
               <ChevronDown className="size-3.5" />
               Load More
               <span className="text-muted-foreground">
-                ({Math.min(hiddenCount, hours.length)} more)
+                ({hiddenCount} more)
               </span>
             </Button>
           )}

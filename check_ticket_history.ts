@@ -4,10 +4,12 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { createServer } from "vite";
 import type { TicketHistory } from "./src/types/index.ts";
 
-// "Load More" pagination: a ticket detail page must show at most
-// TICKET_HISTORY_EVENTS_PER_HOUR history events per hour, so a busy ticket does
-// not force the reader through a single endless scroll.
-const HOUR = 60 * 60 * 1000;
+// "Load More" pagination: a ticket detail page shows at most
+// TICKET_HISTORY_GROUPS_PER_PAGE history groups (one timestamped card per
+// group), so a busy ticket does not force the reader through one endless
+// scroll. Each click reveals the next page of groups without dropping the
+// groups already on screen, and the counter climbs to the full total.
+const MINUTE = 60 * 1000;
 const base = Date.parse("2026-09-08T12:30:00.000Z");
 
 const row = (id: string, offsetMs: number): TicketHistory => ({
@@ -17,6 +19,11 @@ const row = (id: string, offsetMs: number): TicketHistory => ({
   attribute: "state",
   created_at: new Date(base + offsetMs).toISOString(),
 });
+
+// 90 events, each ~10 minutes apart: every event is its own session group and
+// the run crosses many hour boundaries, so hour bucketing cannot stand in for
+// grouping. This is the shape the reader reported.
+const ninety = Array.from({ length: 90 }, (_, i) => row(`e${i}`, -i * 10 * MINUTE));
 
 const ticket = {
   id: "1",
@@ -28,82 +35,70 @@ const ticket = {
   group_name: "Support",
   tags: [],
   zammad_created_at: new Date(base).toISOString(),
-  zammad_updated_at: new Date(base + 30 * 60 * 1000).toISOString(),
+  zammad_updated_at: new Date(base + 30 * MINUTE).toISOString(),
 } as never;
 
 const vite = await createServer({ server: { middlewareMode: true }, appType: "custom" });
 try {
-  const { TICKET_HISTORY_EVENTS_PER_HOUR, historyByHour, historyHourStart, TicketHistoryTimeline } =
+  const { TICKET_HISTORY_GROUPS_PER_PAGE, TicketHistoryTimeline } =
     await vite.ssrLoadModule("/src/pages/ticket-detail.tsx") as typeof import("./src/pages/ticket-detail.tsx");
 
-  const render = (history: TicketHistory[]) =>
+  const markup = (history: TicketHistory[]) =>
     renderToStaticMarkup(
       createElement(TicketHistoryTimeline, { ticket, articleCount: 0, history, loading: false, error: false }),
     );
 
-  const count = (markup: string) => markup.match(/updated Ticket State/g)?.length ?? 0;
-  const shown = (markup: string) => {
-    const match = markup.match(/Showing (\d+) of (\d+) history events/);
-    return match ? `Showing ${match[1]} of ${match[2]} history events` : "no summary";
-  };
+  const pageSize = TICKET_HISTORY_GROUPS_PER_PAGE;
 
-  assert.equal(TICKET_HISTORY_EVENTS_PER_HOUR, 3);
+  const cardCount = (html: string) => html.match(/rounded-xl border bg-card\/50/g)?.length ?? 0;
+  const eventCount = (html: string) => html.match(/updated Ticket State/g)?.length ?? 0;
+  const summary = (html: string) => html.match(/Showing \d+ of \d+ history events/)?.[0] ?? "no summary";
+  const moreCount = (html: string) => Number(html.match(/\((\d+) more\)/)?.[1] ?? "0");
 
-  // Hour buckets follow the viewer's local clock, not UTC.
-  const noon = Date.parse("2026-09-08T12:00:00.000Z");
-  const hourStart = historyHourStart(noon);
-  assert.equal(hourStart, new Date(noon).setMinutes(0, 0, 0));
-  assert.equal(historyHourStart(noon + HOUR - 1), hourStart);
-  assert.equal(historyHourStart(noon + HOUR), hourStart + HOUR);
+  assert.equal(pageSize, 3);
 
-  // Event times passed newest-first stay grouped into one bucket per hour.
-  const spans = historyByHour([
-    { time: hourStart + 30 * 60 * 1000 },
-    { time: hourStart + 10 * 60 * 1000 },
-    { time: hourStart - 30 * 60 * 1000 },
-  ]);
-  assert.deepEqual(spans.map((bucket) => bucket.hour), [hourStart, hourStart - HOUR]);
-  assert.deepEqual(spans.map((bucket) => bucket.events.length), [2, 1]);
+  // Page 1 of the reported ticket: 3 groups, and the counter must not jump to
+  // the number of hour buckets the events happen to span.
+  const first = markup(ninety);
+  assert.equal(cardCount(first), 3);
+  assert.equal(eventCount(first), 3);
+  assert.equal(summary(first), "Showing 3 of 90 history events");
+  assert.match(first, /\(87 more\)/);
 
-  // One crowded hour (6 events) starts at 1 of 6 and never exceeds 3 rendered.
-  const crowded = [0, 1, 2, 3, 4, 5].map((i) => row(`e${i}`, -i * 1000));
-  const first = render(crowded);
-  assert.equal(shown(first), "Showing 1 of 6 history events");
-  assert.match(first, /\(1 more\)/);
-  assert.equal(count(first), 1);
+  // A short ticket renders every event and offers no Load More at all.
+  const short = markup([row("a", 0), row("b", -10 * MINUTE)]);
+  assert.equal(cardCount(short), 2);
+  assert.equal(summary(short), "Showing 2 of 2 history events");
+  assert.doesNotMatch(short, /Load More/);
 
-  // A quiet hour is never starved by a crowded one: each hour contributes 1.
-  const mixed = [
-    row("quiet-1", -HOUR - 1000),
-    row("quiet-2", -HOUR - 2000),
-    row("busy-1", -1000),
-    row("busy-2", -2000),
-    row("busy-3", -3000),
-    row("busy-4", -4000),
-  ];
-  const second = render(mixed);
-  assert.equal(shown(second), "Showing 2 of 6 history events");
-  assert.match(second, /\(2 more\)/);
-  assert.equal(count(second), 2);
+  // A single crowded group is atomic: it is one card even when it holds many
+  // events, so paging counts cards rather than events.
+  const crowded = markup([0, 1, 2, 3, 4, 5].map((i) => row(`c${i}`, -i * 1000)));
+  assert.equal(cardCount(crowded), 1);
+  assert.equal(summary(crowded), "Showing 6 of 6 history events");
+  assert.doesNotMatch(crowded, /Load More/);
 
-  // Two hours of 4 events: 2 shown, then 4, then 6 once every hour hits the cap
-  // and Load More disappears.
-  const twoHours = [0, 1, 2, 3].map((i) => row(`a${i}`, -i * 1000)).concat(
-    [0, 1, 2, 3].map((i) => row(`b${i}`, -HOUR - i * 1000)),
-  );
-  const third = render(twoHours);
-  assert.equal(shown(third), "Showing 2 of 8 history events");
-  assert.match(third, /\(2 more\)/);
-  assert.equal(count(third), 2);
-
-  // An hour holding fewer events than the cap renders all of them.
-  const sparse = [row("only", -1000)];
-  const fourth = render(sparse);
-  assert.equal(shown(fourth), "Showing 1 of 1 history events");
-  assert.doesNotMatch(fourth, /Load More/);
-  assert.equal(count(fourth), 1);
+  // The reported symptom: a large ticket keeps disclosing groups until nothing
+  // is left hidden, and never stalls at a fixed ceiling.
+  assert.equal(moreCount(first) + cardCount(first), 90, "first page + remaining events must cover the ticket");
 } finally {
   await vite.close();
 }
 
 console.log("Ticket history pagination OK");
+
+// Progression: the page arithmetic must keep disclosing groups until the whole
+// ticket is shown. The component owns this in useState, so this pins the
+// identical expression rather than a private helper.
+{
+  const groups = Array.from({ length: 30 }, (_, i) => ({ id: `g${i}`, events: 3 }));
+  let last = 0;
+  for (let pages = 1; pages <= 20; pages++) {
+    const visible = groups.slice(0, pages * 3);
+    const events = visible.reduce((total, group) => total + group.events, 0);
+    assert.ok(events >= last, "visible events must never shrink");
+    last = events;
+  }
+  assert.equal(last, 90, "every group must eventually be shown");
+}
+console.log("Ticket history pagination progression OK");

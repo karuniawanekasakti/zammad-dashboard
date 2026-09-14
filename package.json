@@ -9,6 +9,7 @@
     "lint": "eslint .",
     "check:settings": "node --experimental-strip-types check_settings_page.ts",
     "check:sla": "node --experimental-strip-types check_sla_deadline.ts",
+    "check:history": "node --experimental-strip-types check_ticket_history.ts",
     "preview": "vite preview"
   },
   "dependencies": {

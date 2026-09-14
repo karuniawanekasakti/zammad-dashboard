@@ -32,6 +32,32 @@ const ICONS = {
 } as const;
 
 const SESSION_WINDOW_MS = 3 * 60 * 1000;
+
+// A ticket detail page shows at most TICKET_HISTORY_EVENTS_PER_HOUR history
+// events per hour bucket, so a busy ticket does not force one endless scroll.
+// "Load More" reveals another event in every hour that still has one hidden.
+// Zammad renders history for the viewer's timezone, so buckets use local hours.
+export const TICKET_HISTORY_EVENTS_PER_HOUR = 3;
+
+export function historyHourStart(time: number) {
+  const date = new Date(time);
+  date.setMinutes(0, 0, 0);
+  return date.getTime();
+}
+
+export function historyByHour<T extends { time: number }>(events: T[]) {
+  return events.reduce<{ hour: number; events: T[] }[]>((buckets, event) => {
+    const hour = historyHourStart(event.time);
+    const last = buckets[buckets.length - 1];
+    if (last?.hour === hour) {
+      last.events.push(event);
+      return buckets;
+    }
+    buckets.push({ hour, events: [event] });
+    return buckets;
+  }, []);
+}
+
 const FILTERS = [
   { key: "all", label: "All" },
   { key: "state", label: "State Changes" },
@@ -317,7 +343,7 @@ function fallbackHistory(ticket: Ticket, articles: TicketArticle[]): TicketHisto
 
 type NormalizedHistory = ReturnType<typeof normalizeHistory>;
 
-function TicketHistoryTimeline({
+export function TicketHistoryTimeline({
   ticket,
   articleCount,
   history,
@@ -333,9 +359,21 @@ function TicketHistoryTimeline({
   const [filter, setFilter] = useState<TimelineFilter>("all");
   const [sortDir, setSortDir] = useState<"desc" | "asc">("desc");
   const [expandedNotifications, setExpandedNotifications] = useState<Record<string, boolean>>({});
+  const [clicks, setClicks] = useState(0);
+
   const events = useMemo(() => history.map(normalizeHistory).sort((a, b) => sortDir === "desc" ? b.time - a.time : a.time - b.time), [history, sortDir]);
   const filteredEvents = filter === "all" ? events : events.filter((event) => filterKind(event.kind) === filter);
-  const groups = useMemo(() => groupTimelineEvents(filteredEvents), [filteredEvents]);
+
+  // Each hour bucket is capped at the reader's current allowance; events are
+  // taken within each hour so a crowded hour never hides a quiet one.
+  const shownPerHour = Math.min(clicks + 1, TICKET_HISTORY_EVENTS_PER_HOUR);
+  const hours = useMemo(() => historyByHour(filteredEvents), [filteredEvents]);
+  const visibleEvents = useMemo(
+    () => hours.flatMap((bucket) => bucket.events.slice(0, shownPerHour)),
+    [hours, shownPerHour],
+  );
+  const groups = useMemo(() => groupTimelineEvents(visibleEvents), [visibleEvents]);
+  const hiddenCount = filteredEvents.length - visibleEvents.length;
 
   if (loading) {
     return <div className="space-y-5">{[0, 1, 2].map((i) => <TimelineSkeleton key={i} />)}</div>;
@@ -355,7 +393,7 @@ function TicketHistoryTimeline({
               size="sm"
               variant={filter === item.key ? "default" : "outline"}
               className="h-8 rounded-full px-3 text-xs"
-              onClick={() => setFilter(item.key)}
+              onClick={() => { setFilter(item.key); setClicks(0); }}
             >
               {item.label}
             </Button>
@@ -412,6 +450,28 @@ function TicketHistoryTimeline({
             );
           })}
         </Timeline>
+      )}
+      {filteredEvents.length > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-4 text-xs text-muted-foreground">
+          <span>
+            Showing {visibleEvents.length} of {filteredEvents.length} history events · up to {TICKET_HISTORY_EVENTS_PER_HOUR} per hour
+          </span>
+          {hiddenCount > 0 && (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-8 gap-1 rounded-full px-3 text-xs"
+              onClick={() => setClicks((value) => value + 1)}
+            >
+              <ChevronDown className="size-3.5" />
+              Load More
+              <span className="text-muted-foreground">
+                ({Math.min(hiddenCount, hours.length)} more)
+              </span>
+            </Button>
+          )}
+        </div>
       )}
     </div>
   );

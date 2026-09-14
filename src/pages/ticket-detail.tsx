@@ -369,8 +369,9 @@ export function TicketHistoryTimeline({
               key={item.key}
               type="button"
               size="sm"
-              onClick={() => { setFilter(item.key); setPages(1); }}
+              variant={filter === item.key ? "default" : "outline"}
               className="h-8 rounded-full px-3 text-xs"
+              onClick={() => { setFilter(item.key); setPages(1); }}
             >
               {item.label}
             </Button>
@@ -379,8 +380,9 @@ export function TicketHistoryTimeline({
         <Button
           type="button"
           size="sm"
-          onClick={() => { setSortDir((value) => value === "desc" ? "asc" : "desc"); setPages(1); }}
+          variant="outline"
           className="h-8 gap-1 rounded-full px-3 text-xs"
+          onClick={() => { setSortDir((value) => value === "desc" ? "asc" : "desc"); setPages(1); }}
         >
           <ArrowDownUp className="size-3.5" />
           {sortDir === "desc" ? "Newest first" : "Oldest first"}

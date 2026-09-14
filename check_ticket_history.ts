@@ -81,6 +81,35 @@ try {
   // The reported symptom: a large ticket keeps disclosing groups until nothing
   // is left hidden, and never stalls at a fixed ceiling.
   assert.equal(moreCount(first) + cardCount(first), 90, "first page + remaining events must cover the ticket");
+
+  // Filter buttons: exactly one button may carry the blue "default" variant.
+  // "All" is selected on first render, so every other filter must be neutral.
+  const buttonFor = (html: string, label: string) =>
+    html.match(new RegExp(`<button[^>]*>(?:<svg[\\s\\S]*?</svg>)?${label}</button>`))?.[0] ?? "";
+  const isActive = (button: string) => button.includes("bg-primary text-primary-foreground");
+  const isNeutral = (button: string) => button.includes("border border-input bg-background");
+
+  const labels = ["All", "State Changes", "Articles", "SLA", "Owner", "Notifications"];
+  const buttons = labels.map((label) => buttonFor(first, label));
+  assert.ok(buttons.every(Boolean), "every filter button must render");
+  assert.equal(buttons.filter(isActive).length, 1, "exactly one filter may look selected");
+  assert.ok(isActive(buttons[0]), "the initial filter (All) is the selected one");
+  for (let i = 1; i < buttons.length; i++) {
+    assert.ok(isNeutral(buttons[i]), `${labels[i]} must use the inactive style`);
+    assert.ok(!isActive(buttons[i]), `${labels[i]} must not look selected`);
+  }
+
+  // The sort control is not a filter: it must stay neutral so it never competes
+  // with the selected filter for the "one blue thing" cue.
+  const sortButton = buttonFor(first, "Newest first");
+  assert.ok(sortButton, "the sort button must render");
+  assert.ok(!isActive(sortButton), "the sort button must not look selected");
+
+  // Switching filters cannot be driven here: the selected key lives in
+  // component useState and the repo has no DOM environment or test runner, so
+  // SSR only ever renders the initial "all" selection. The assertions above
+  // pin the style of the selected vs unselected buttons; the switch itself is
+  // the same `filter === item.key` comparison applied to the clicked key.
 } finally {
   await vite.close();
 }

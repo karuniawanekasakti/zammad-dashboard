@@ -91,7 +91,11 @@ docker compose exec api python check_sync_telemetry.py  # sync summary: watermar
 
 `check_ticket_sorting.py` is the pattern for testing router logic without a DB: patch `cache_get`/`cache_set`/`zammad` module attributes on `app.routers.tickets`, call the endpoint function directly, `assert` on the result, run with `python`.
 
-`check_sync_telemetry.py` covers the Settings sync summary: it asserts the incremental watermark reaches Zammad at date granularity (a `+00:00`/`Z` suffix makes this Zammad return `[]` silently), that a managed run records its real `source` rather than a hardcoded one, and that `duration_secs` spans the whole run.
+`check_sync_telemetry.py` covers the Settings sync summary: it asserts the incremental watermark reaches Zammad in a form its search cannot misparse — an inclusive bracketed range (`updated_at:[<watermark> TO *]`), not a bare-date `>` comparison (a bare date is read in the instance's timezone and `>` rounds up past the current day, while an unescaped `:` is parsed as a field separator; both fail silently with an empty result) — that a managed run records its real `source` rather than a hardcoded one, and that `duration_secs` spans the whole run.
+
+`check_live_sla.py` is the regression check for the two-contradictory-verdicts bug: it reads one ticket through the ticket-detail path and through the SLA Monitor path and asserts an identical verdict and countdown, that a stored `sla_status` is never an input, that a closed-late ticket reports its real breach magnitude rather than deadline-minus-now, and that Unmonitored stays distinct from Breached.
+
+`check_beat_schedule.py` asserts that a scheduler refresh applies a changed interval while preserving each existing entry's `last_run_at` and `total_run_count`, and that a Full Reconcile whose interval has elapsed is still due after a refresh.
 
 ## Not implemented yet (per PRD)
 

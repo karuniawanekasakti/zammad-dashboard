@@ -57,6 +57,8 @@ async def main() -> None:
     res = await tickets.list_tickets(current={"sub": "1", "role": "admin", "group_ids": []}, db=object(), page=1, per_page=1)
     assert res.meta["total"] == 3
     assert res.data[0]["id"] == "2", f"expected ticket 2 first (newest update), got {res.data[0]['id']}"
+    assert "live_sla_status" in res.data[0] and "sla_remaining_ms" in res.data[0]
+    assert "sla_status" not in res.data[0] and "first_response_remaining_secs" not in res.data[0]
 
     print("check_ticket_sorting: OK")
 

@@ -37,7 +37,7 @@ function downloadTicketsCsv(rows: Ticket[]) {
     ticket.group_name,
     ticket.owner_name ?? "Unassigned",
     ticket.customer_name,
-    ticket.sla_status,
+    ticket.live_sla_status,
     ticket.zammad_updated_at,
   ]);
   const csv = [headers, ...body].map((row) => row.map(csvCell).join(",")).join("\n");

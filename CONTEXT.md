@@ -44,6 +44,12 @@ been reopened.
 
 An **active ticket** is currently `new`, `open`, or `pending`. A **monitored ticket** is an active ticket with an actionable SLA deadline. An active ticket without one is **Unmonitored** (`no_sla`).
 
+A ticket's **live SLA status** is its SLA verdict evaluated from the ticket's own current facts and the present moment. It is the only authoritative verdict, and it is the one every surface shows.
+_Avoid_: current status, real-time status
+
+A ticket's **stored SLA status** is the verdict that was recorded for the ticket at the moment it was last synchronized. It is a snapshot rather than a verdict: stale by construction, and never presented as a ticket's current status.
+_Avoid_: cached status, saved status
+
 The **actionable deadline** is Zammad's current escalation deadline, or otherwise the next unsatisfied milestone deadline. A completed first-response milestone is not actionable.
 
 **Warning** means the deadline is at most two hours away; **Critical** means it is at most 30 minutes away. **At-Risk** is Warning plus Critical. **Breached** means the actionable deadline passed or synchronized breach evidence exists; later milestones do not erase that evidence.
@@ -69,6 +75,10 @@ An **Incremental Sync** refreshes records changed since the successful
 checkpoint. An **Automatic Incremental Sync** is an Incremental Sync requested
 without administrator action when the dataset is Out of Date. A **Full
 Reconcile** establishes or refreshes the complete synchronized dataset.
+
+The **sync watermark** is the point in time from which an Incremental Sync looks
+for changed tickets. It advances only after a run completes successfully, and it
+is the lower bound of the next run's window.
 
 ## Release
 

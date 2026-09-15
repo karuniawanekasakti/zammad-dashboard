@@ -4,7 +4,8 @@ import type { SlaStatus } from "@/types";
 
 interface Props {
   status: SlaStatus;
-  remainingSecs?: number | null;
+  /** Remaining time in milliseconds, as the ticket payload carries it. */
+  remainingMs?: number | null;
   compact?: boolean;
   className?: string;
 }
@@ -19,8 +20,9 @@ const MAP: Record<SlaStatus, { variant: "success" | "warning" | "destructive" | 
   closed_on_time: { variant: "success", label: "Closed on time", dot: "bg-emerald-500" },
 };
 
-export function SlaBadge({ status, remainingSecs, compact, className }: Props) {
+export function SlaBadge({ status, remainingMs, compact, className }: Props) {
   const meta = MAP[status] ?? { variant: "secondary" as const, label: String(status || "Unknown"), dot: "bg-muted-foreground" };
+  const remainingSecs = remainingMs == null ? null : remainingMs / 1000;
   const timeText =
     remainingSecs == null
       ? null

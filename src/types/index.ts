@@ -54,7 +54,8 @@ export interface Ticket {
   owner_name: string | null;
   customer_name: string;
   tags: string[];
-  sla_status: SlaStatus;
+  live_sla_status: SlaStatus;
+  sla_remaining_ms: number | null;
   escalation_at: string | null;
   first_response_at: string | null;
   first_response_escalation_at: string | null;
@@ -66,7 +67,6 @@ export interface Ticket {
   close_diff_in_min: number | null;
   update_escalation_at: string | null;
   update_diff_in_min: number | null;
-  first_response_remaining_secs: number | null;
   first_response_breached: boolean;
   close_breached: boolean;
   reopen_count: number;
@@ -81,8 +81,6 @@ export interface Ticket {
 
 export interface SlaMonitorTicket extends Ticket {
   actionable_deadline: string | null;
-  live_sla_status: SlaStatus;
-  sla_remaining_ms: number | null;
   sla_progress: number;
 }
 

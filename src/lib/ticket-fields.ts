@@ -10,7 +10,7 @@ export const TICKET_FIELDS = [
   { key: "group_id", label: "Group", filter: "select", sortable: true },
   { key: "owner_id", label: "Agent", filter: "select", sortable: true },
   { key: "customer_name", label: "Customer", filter: "text", sortable: true },
-  { key: "sla_status", label: "SLA", filter: "select", sortable: true },
+  { key: "live_sla_status", label: "SLA", filter: "select", sortable: true },
   { key: "zammad_updated_at", label: "Updated", filter: "text", sortable: true },
 ] as const;
 
@@ -57,7 +57,7 @@ export function buildTicketFilterFields(groups: DataTableOption[], agents: DataT
     { id: "ticket_category", label: "Ticket Category", variant: "select", options: TICKET_CATEGORY_OPTIONS },
     { id: "group_id", label: "Group", variant: "select", options: groups },
     { id: "owner_id", label: "Agent", variant: "select", options: agents },
-    { id: "sla_status", label: "SLA", variant: "select", options: SLA_OPTIONS },
+    { id: "live_sla_status", label: "SLA", variant: "select", options: SLA_OPTIONS },
   ];
 }
 

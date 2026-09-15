@@ -99,7 +99,7 @@ const TICKET_FILTER_FIELDS = new Set<keyof Ticket>([
   "group_id",
   "owner_id",
   "customer_name",
-  "sla_status",
+  "live_sla_status",
   "zammad_updated_at",
 ]);
 
@@ -379,12 +379,12 @@ const mockApi = {
 
   async listAtRisk(scope: Scope): Promise<Ticket[]> {
     const rows = applyScope(tickets, scope).filter(
-      (t) => t.sla_status === "warning" || t.sla_status === "critical" || t.sla_status === "breached"
+      (t) => t.live_sla_status === "warning" || t.live_sla_status === "critical" || t.live_sla_status === "breached"
     );
     return delay(
       rows.sort(
         (a, b) =>
-          (a.first_response_remaining_secs ?? Infinity) - (b.first_response_remaining_secs ?? Infinity)
+          (a.sla_remaining_ms ?? Infinity) - (b.sla_remaining_ms ?? Infinity)
       )
     );
   },

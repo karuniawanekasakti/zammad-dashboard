@@ -161,10 +161,10 @@ function ticketColumns(onView: (ticket: Ticket) => void): ColumnDef<Ticket>[] {
       cell: ({ row }) => row.original.owner_name ?? <span className="text-muted-foreground">Unassigned</span>,
     },
     {
-      accessorKey: "sla_status",
+      accessorKey: "live_sla_status",
       header: "SLA",
       meta: { label: "SLA" },
-      cell: ({ row }) => <SlaBadge status={row.original.sla_status} remainingSecs={row.original.first_response_remaining_secs} compact />,
+      cell: ({ row }) => <SlaBadge status={row.original.live_sla_status} remainingMs={row.original.sla_remaining_ms} compact />,
     },
     {
       accessorKey: "zammad_updated_at",

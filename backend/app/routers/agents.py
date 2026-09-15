@@ -11,7 +11,7 @@ from app.deps import get_current_user, get_db
 from app.models import AgentStat, ApiResponse, TicketOut, UserOut
 from app.repositories import list_tickets, list_users
 from app.routers.auth import _map_role
-from app.routers.tickets import OPEN_STATES
+from app.routers.tickets import OPEN_STATES, _effective_sla_status
 
 router = APIRouter()
 
@@ -43,13 +43,14 @@ def _avg(values: list[int | None]) -> int:
 def _agent_stat(agent: UserOut, tickets: list[TicketOut]) -> AgentStat:
     rows = [t for t in tickets if t.owner_id == agent.id]
     open_rows = [t for t in rows if t.state in OPEN_STATES]
-    breached = [t for t in rows if t.first_response_breached or t.close_breached or t.sla_status == "breached"]
-    closed_cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+    now = datetime.now(timezone.utc)
+    breached = [t for t in rows if _effective_sla_status(t, now) == "breached"]
+    closed_cutoff = now - timedelta(days=7)
     closed_this_week = [t for t in rows if t.closed_at and t.closed_at >= closed_cutoff]
     return AgentStat(
         agent=agent,
         open_tickets=len(open_rows),
-        at_risk=len([t for t in rows if t.sla_status in ("warning", "critical")]),
+        at_risk=len([t for t in rows if _effective_sla_status(t, now) in ("warning", "critical")]),
         breached=len(breached),
         avg_first_reply_secs=_avg([t.first_reply_time_secs for t in rows]),
         avg_resolution_secs=_avg([t.resolution_time_secs for t in rows]),

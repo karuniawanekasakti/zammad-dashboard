@@ -85,7 +85,7 @@ export default function TicketDetailPage() {
           <span className="flex items-center gap-2 text-sm flex-wrap">
             <StateBadge state={ticket.state} />
             <PriorityBadge priority={ticket.priority} />
-            <SlaBadge status={ticket.sla_status} remainingSecs={ticket.first_response_remaining_secs} />
+            <SlaBadge status={ticket.live_sla_status} remainingMs={ticket.sla_remaining_ms} />
             {ticket.reopen_count > 0 && (
               <Badge variant="muted" className="gap-1">
                 <RotateCcw className="size-3" /> Reopened × {ticket.reopen_count}
@@ -456,7 +456,7 @@ export function TicketHistoryTimeline({
 }
 
 function HistorySummary({ ticket, articleCount }: { ticket: Ticket; articleCount: number }) {
-  const breached = ticket.sla_status === "breached" || ticket.first_response_breached || ticket.close_breached;
+  const breached = ticket.live_sla_status === "breached" || ticket.first_response_breached || ticket.close_breached;
 
   return (
     <div className="grid gap-2 rounded-xl border bg-muted/40 p-3 text-sm sm:grid-cols-4">

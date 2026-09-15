@@ -1,6 +1,6 @@
 """Group endpoints. Reads from PostgreSQL (synced by Celery workers)."""
 from collections import defaultdict
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
@@ -11,7 +11,7 @@ from app.db_models import GroupRow
 from app.deps import get_current_user, get_db
 from app.models import ApiResponse, GroupOut, GroupStat, TicketOut, TrendPoint, UserOut
 from app.repositories import list_groups as list_group_rows, list_tickets, list_users
-from app.routers.tickets import OPEN_STATES
+from app.routers.tickets import OPEN_STATES, _effective_sla_status
 
 router = APIRouter()
 
@@ -49,7 +49,8 @@ def _trend(tickets: list[TicketOut], days: int = 14) -> list[dict]:
 
 def _group_stat(group: GroupOut, tickets: list[TicketOut]) -> GroupStat:
     rows = [t for t in tickets if t.group_id == group.id]
-    breached = [t for t in rows if t.first_response_breached or t.close_breached or t.sla_status == "breached"]
+    now = datetime.now(timezone.utc)
+    breached = [t for t in rows if _effective_sla_status(t, now) == "breached"]
     return GroupStat(
         group=group,
         open_tickets=len([t for t in rows if t.state in OPEN_STATES]),

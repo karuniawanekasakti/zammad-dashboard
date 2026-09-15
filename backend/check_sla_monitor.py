@@ -150,13 +150,15 @@ def main() -> None:
     for id_, evidence in enumerate((
         {"first_response_breached": True},
         {"close_breached": True},
-        {"sla_status": "breached"},
+        {"update_diff_in_min": -1},
     ), start=304):
         for deadline in (now + timedelta(hours=4), None):
             preserved_breach = _build_sla_monitor([
                 ticket(id_, escalation_at=deadline, **evidence)
             ], now)["tickets"][0]
             assert preserved_breach["live_sla_status"] == "breached"
+            assert "sla_status" not in preserved_breach
+            assert "first_response_remaining_secs" not in preserved_breach
 
     boundary_rows = _build_sla_monitor([
         ticket(307, escalation_at=now + timedelta(minutes=30)),

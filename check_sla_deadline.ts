@@ -67,7 +67,8 @@ const ticket = (deadline: string | null, overrides = {}) => ({
   closed_at: null,
   first_response_breached: false,
   close_breached: false,
-  sla_status: "safe" as const,
+  live_sla_status: "safe" as const,
+  sla_remaining_ms: deadline ? new Date(deadline).getTime() - now.getTime() : null,
   zammad_created_at: "2026-09-08T04:00:00.000Z",
   ...overrides,
 });
@@ -78,6 +79,11 @@ assert.equal(slaStatus(ticket("2026-09-08T10:00:00.000Z"), now), "warning");
 assert.equal(slaStatus(ticket("2026-09-08T10:00:01.000Z"), now), "on_track");
 assert.equal(slaStatus(ticket("2026-09-08T12:00:00.000Z", { first_response_breached: true }), now), "breached");
 assert.equal(slaStatus(ticket(null, { first_response_breached: true }), now), "breached");
+// The verdict is derived from the ticket's own facts, never from a verdict
+// field: a stale "breached" with no breach evidence is not a breach.
+const staleVerdict = ticket(null, { live_sla_status: "breached" as const, sla_remaining_ms: -15 * 60 * 1000 });
+assert.equal(slaStatus(staleVerdict, now), "no_sla");
+assert.equal(staleVerdict.sla_remaining_ms, -15 * 60 * 1000);
 assert.equal(slaStatus(ticket(null, { state: "closed", close_at: current, first_response_diff_in_min: 5, close_diff_in_min: 10 }), now), "closed_on_time");
 assert.equal(slaStatus(ticket(null, { state: "closed", close_at: current, first_response_diff_in_min: 5, update_diff_in_min: -1, close_diff_in_min: 10 }), now), "breached");
 assert.equal(slaStatus(ticket(null), now), "no_sla");
@@ -113,7 +119,6 @@ const mockTicket = (id: string, overrides: Partial<Ticket>): Ticket => ({
   close_in_min: null,
   close_diff_in_min: null,
   update_diff_in_min: null,
-  first_response_remaining_secs: null,
   reopen_count: 0,
   first_reply_time_secs: null,
   resolution_time_secs: null,

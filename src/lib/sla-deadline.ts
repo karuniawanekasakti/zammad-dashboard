@@ -17,7 +17,6 @@ type SlaStatusFields = SlaDeadlineFields & Pick<Ticket,
   | "update_diff_in_min"
   | "close_diff_in_min"
   | "close_breached"
-  | "sla_status"
 >;
 
 export function slaDeadline(ticket: SlaDeadlineFields): Date | null {
@@ -31,7 +30,7 @@ export function slaDeadline(ticket: SlaDeadlineFields): Date | null {
 export function slaStatus(ticket: SlaStatusFields, now: Date): SlaStatus {
   const deadline = slaDeadline(ticket);
   const outcomeDiffs = [ticket.first_response_diff_in_min, ticket.update_diff_in_min, ticket.close_diff_in_min].filter((value): value is number => value != null);
-  if (ticket.first_response_breached || ticket.close_breached || ticket.sla_status === "breached" || outcomeDiffs.some((value) => value < 0)) return "breached";
+  if (ticket.first_response_breached || ticket.close_breached || outcomeDiffs.some((value) => value < 0)) return "breached";
   if ((ticket.state === "closed" || ticket.state === "merged") && outcomeDiffs.length) return "closed_on_time";
   if (!deadline) return "no_sla";
   if (ticket.state === "closed" || ticket.state === "merged") {

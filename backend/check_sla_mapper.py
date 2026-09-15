@@ -1,7 +1,7 @@
 """Assert Zammad SLA fields survive ticket mapping."""
 from datetime import datetime, timedelta, timezone
 
-from app.routers.tickets import _build_sla_monitor, _map_ticket
+from app.routers.tickets import _build_sla_monitor, _map_ticket, ticket_payload
 
 raw = {
     "id": 123,
@@ -84,7 +84,8 @@ late_update = _map_ticket({
     "close_diff_in_min": None,
     "update_diff_in_min": -1,
 })
-assert late_update.sla_status == "breached"
+assert ticket_payload(late_update)["live_sla_status"] == "breached"
+assert ticket_payload(late_update)["sla_remaining_ms"] is not None
 
 now = datetime.now(timezone.utc)
 future_escalation = now + timedelta(hours=4)

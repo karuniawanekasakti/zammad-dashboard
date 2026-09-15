@@ -254,8 +254,8 @@ export const slaPolicies: SlaPolicy[] = [
 function pickSla(state: TicketState, createdHoursAgo: number) {
   if (state === "closed") {
     return {
-      sla_status: "safe" as const,
-      first_response_remaining_secs: null,
+      live_sla_status: "safe" as const,
+      sla_remaining_ms: null,
       first_response_breached: rand() > 0.85,
       close_breached: rand() > 0.88,
     };
@@ -263,29 +263,29 @@ function pickSla(state: TicketState, createdHoursAgo: number) {
   const r = rand();
   if (r < 0.55) {
     return {
-      sla_status: "safe" as const,
-      first_response_remaining_secs: between(2 * 3600, 24 * 3600),
+      live_sla_status: "safe" as const,
+      sla_remaining_ms: between(2 * 3600, 24 * 3600) * 1000,
       first_response_breached: false,
       close_breached: false,
     };
   } else if (r < 0.78) {
     return {
-      sla_status: "warning" as const,
-      first_response_remaining_secs: between(30 * 60, 2 * 3600),
+      live_sla_status: "warning" as const,
+      sla_remaining_ms: between(30 * 60, 2 * 3600) * 1000,
       first_response_breached: false,
       close_breached: false,
     };
   } else if (r < 0.9) {
     return {
-      sla_status: "critical" as const,
-      first_response_remaining_secs: between(60, 30 * 60),
+      live_sla_status: "critical" as const,
+      sla_remaining_ms: between(60, 30 * 60) * 1000,
       first_response_breached: false,
       close_breached: false,
     };
   } else {
     return {
-      sla_status: "breached" as const,
-      first_response_remaining_secs: -between(300, 3 * 3600),
+      live_sla_status: "breached" as const,
+      sla_remaining_ms: -between(300, 3 * 3600) * 1000,
       first_response_breached: true,
       close_breached: createdHoursAgo > 48,
     };
@@ -328,10 +328,10 @@ for (let i = 0; i < TICKET_COUNT; i++) {
     owner_name: owner ? fullName(owner) : null,
     customer_name: pick(CUSTOMERS),
     tags: Array.from(new Set([pick(TAG_POOL), pick(TAG_POOL)])).filter(Boolean),
-    sla_status: sla.sla_status,
-    escalation_at: sla.first_response_remaining_secs == null ? null : new Date(Date.now() + sla.first_response_remaining_secs * 1000).toISOString(),
+    live_sla_status: sla.live_sla_status,
+    escalation_at: sla.sla_remaining_ms == null ? null : new Date(Date.now() + sla.sla_remaining_ms).toISOString(),
     first_response_at: first_reply_time_secs == null ? null : new Date(new Date(zammad_created_at).getTime() + first_reply_time_secs * 1000).toISOString(),
-    first_response_escalation_at: sla.first_response_remaining_secs == null ? null : new Date(Date.now() + sla.first_response_remaining_secs * 1000).toISOString(),
+    first_response_escalation_at: sla.sla_remaining_ms == null ? null : new Date(Date.now() + sla.sla_remaining_ms).toISOString(),
     first_response_in_min: first_reply_time_secs == null ? null : Math.floor(first_reply_time_secs / 60),
     first_response_diff_in_min: sla.first_response_breached ? -between(5, 120) : between(5, 240),
     close_at: closedHoursAgo ? new Date(Date.now() - closedHoursAgo * 3600 * 1000).toISOString() : null,
@@ -340,7 +340,7 @@ for (let i = 0; i < TICKET_COUNT; i++) {
     close_diff_in_min: state === "closed" ? (sla.close_breached ? -between(10, 240) : between(10, 480)) : null,
     update_escalation_at: state === "closed" ? null : new Date(Date.now() + between(1, 6) * 3600 * 1000).toISOString(),
     update_diff_in_min: state === "closed" ? null : between(-60, 240),
-    first_response_remaining_secs: sla.first_response_remaining_secs,
+    sla_remaining_ms: sla.sla_remaining_ms,
     first_response_breached: sla.first_response_breached,
     close_breached: sla.close_breached,
     reopen_count: rand() < 0.08 ? between(1, 3) : 0,
@@ -462,7 +462,7 @@ export function kpiSummaryForScope(scope: { role: string; group_ids?: string[]; 
     return Date.now() - d.getTime() < 24 * 3600 * 1000;
   });
   const breached = scoped.filter(
-    (t) => t.first_response_breached || t.close_breached || t.sla_status === "breached"
+    (t) => t.first_response_breached || t.close_breached || t.live_sla_status === "breached"
   );
   const slaTotal = scoped.length || 1;
   const reopened = scoped.filter((t) => t.reopen_count > 0);
@@ -482,7 +482,7 @@ export function kpiSummaryForScope(scope: { role: string; group_ids?: string[]; 
     new_today: scoped.filter(
       (t) => Date.now() - new Date(t.zammad_created_at).getTime() < 24 * 3600 * 1000
     ).length,
-    at_risk: scoped.filter((t) => t.sla_status === "warning" || t.sla_status === "critical").length,
+    at_risk: scoped.filter((t) => t.live_sla_status === "warning" || t.live_sla_status === "critical").length,
   };
 }
 
@@ -506,8 +506,8 @@ export function agentStats(): AgentStat[] {
   return agents.map((agent) => {
     const own = tickets.filter((t) => t.owner_id === agent.id);
     const open = own.filter((t) => t.state !== "closed");
-    const atRisk = own.filter((t) => t.sla_status === "warning" || t.sla_status === "critical").length;
-    const breached = own.filter((t) => t.sla_status === "breached" || t.first_response_breached).length;
+    const atRisk = own.filter((t) => t.live_sla_status === "warning" || t.live_sla_status === "critical").length;
+    const breached = own.filter((t) => t.live_sla_status === "breached" || t.first_response_breached).length;
     const replyTimes = own.map((t) => t.first_reply_time_secs).filter((n): n is number => n != null);
     const resTimes = own.map((t) => t.resolution_time_secs).filter((n): n is number => n != null);
     const reopen = own.filter((t) => t.reopen_count > 0).length;

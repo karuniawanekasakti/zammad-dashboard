@@ -349,7 +349,7 @@ function TeamLeadDashboard({ scope, agentFilter, chart }: { scope: ReturnType<ty
               <div key={t.id} className="flex items-center gap-2 border rounded-md p-2 text-sm">
                 <div className="font-mono text-xs text-muted-foreground w-12">#{t.number}</div>
                 <div className="flex-1 truncate">{t.title}</div>
-                <SlaBadge status={t.sla_status} remainingSecs={t.first_response_remaining_secs} />
+                <SlaBadge status={t.live_sla_status} remainingMs={t.sla_remaining_ms} />
               </div>
             ))}
             {(atRisk.data ?? []).length === 0 && (
@@ -633,7 +633,7 @@ function AgentDashboard({ scope, userId, chart }: { scope: ReturnType<typeof use
                   <TableCell className="font-mono">#{t.number}</TableCell>
                   <TableCell className="max-w-xs truncate">{t.title}</TableCell>
                   <TableCell><PriorityBadge priority={t.priority} /></TableCell>
-                  <TableCell><SlaBadge status={t.sla_status} remainingSecs={t.first_response_remaining_secs} /></TableCell>
+                  <TableCell><SlaBadge status={t.live_sla_status} remainingMs={t.sla_remaining_ms} /></TableCell>
                   <TableCell><StateBadge state={t.state} /></TableCell>
                   <TableCell className="text-xs text-muted-foreground">
                     {formatDistanceToNow(new Date(t.zammad_updated_at), { addSuffix: true })}

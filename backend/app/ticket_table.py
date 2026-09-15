@@ -20,7 +20,7 @@ TICKET_TABLE_FIELDS = {
     "group_id",
     "owner_id",
     "customer_name",
-    "sla_status",
+    "live_sla_status",
     "zammad_updated_at",
 }
 

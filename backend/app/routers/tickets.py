@@ -82,18 +82,6 @@ def _parse_zammad_dt(value: str | None) -> datetime | None:
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
-def _sla_bucket(remaining: int | None) -> str:
-    if remaining is None:
-        return "safe"
-    if remaining < 0:
-        return "breached"
-    if remaining < 1800:
-        return "critical"
-    if remaining < 7200:
-        return "warning"
-    return "safe"
-
-
 def _expanded_name(value, fallback: str | None = None) -> str | None:
     if isinstance(value, dict):
         full_name = " ".join(part for part in (value.get("firstname"), value.get("lastname")) if part)
@@ -115,7 +103,8 @@ def _map_ticket(t: dict) -> TicketOut:
     first_response_diff = _int_or_none(t.get("first_response_diff_in_min"))
     close_diff = _int_or_none(t.get("close_diff_in_min"))
     first_response_satisfied = bool(first_response_at or (first_response_diff is not None and first_response_diff >= 0))
-    deadline = escalation_at or (first_response_deadline if not first_response_satisfied else None) or update_deadline or close_deadline
+    fallback_deadlines = [value for value in (update_deadline, close_deadline) if value]
+    deadline = escalation_at or (first_response_deadline if not first_response_satisfied else None) or (min(fallback_deadlines) if fallback_deadlines else None)
     remaining = int((deadline - now).total_seconds()) if deadline else None
     first_response_breached = first_response_diff < 0 if first_response_diff is not None else bool(
         first_response_at and first_response_deadline and first_response_at > first_response_deadline
@@ -126,7 +115,6 @@ def _map_ticket(t: dict) -> TicketOut:
         or not close_at and close_deadline and close_deadline < now
     )
     update_diff = _int_or_none(t.get("update_diff_in_min"))
-    sla_status = "breached" if (remaining is not None and remaining < 0) or first_response_breached or close_breached or (update_diff is not None and update_diff < 0) else _sla_bucket(remaining)
 
     severity = _custom_field_value(t.get("priority_case"))
     ticket_category = _custom_field_value(t.get("ticket_category"))
@@ -150,7 +138,10 @@ def _map_ticket(t: dict) -> TicketOut:
         owner_name=_expanded_name(t.get("owner")),
         customer_name=_expanded_name(t.get("customer"), str(t.get("customer_id") or "")) or "",
         tags=t.get("tags") if isinstance(t.get("tags"), list) else [],
-        sla_status=sla_status,
+        # The tickets.sla_status column is still NOT NULL with no server
+        # default; the live verdict is derived on read, so nothing meaningful
+        # is written here. Dropping the column is issue #34.
+        sla_status="no_sla",
         escalation_at=escalation_at,
         first_response_at=first_response_at,
         first_response_escalation_at=first_response_deadline,
@@ -222,6 +213,22 @@ def _scope_filter(tickets: list[TicketOut], user: dict) -> list[TicketOut]:
 
 def _row_to_ticket(row: TicketRow) -> TicketOut:
     return TicketOut.model_validate(row, from_attributes=True)
+
+
+def ticket_payload(ticket: TicketOut, now: datetime | None = None) -> dict:
+    """Serialize a ticket with its live, read-time SLA status.
+
+    The verdict and countdown are derived here from the ticket's own Zammad
+    facts and the present moment — never stored, never read back — so every
+    surface that serializes a ticket agrees with every other. The stored
+    verdict fields are dropped from the payload so nothing can read them.
+    """
+    now = now or datetime.now(timezone.utc)
+    return {
+        **ticket.model_dump(mode="json", exclude={"sla_status", "first_response_remaining_secs"}),
+        "live_sla_status": _effective_sla_status(ticket, now),
+        "sla_remaining_ms": _sla_remaining_ms(ticket, now),
+    }
 
 
 async def _fetch_scoped(current: dict, db: AsyncSession) -> list[TicketOut]:
@@ -358,7 +365,7 @@ def _sla_outcome_diffs(ticket: TicketOut) -> tuple[int, ...]:
 def _effective_sla_status(ticket: TicketOut, now: datetime) -> str:
     deadline = _sla_deadline(ticket)
     outcome_diffs = _sla_outcome_diffs(ticket)
-    if ticket.first_response_breached or ticket.close_breached or ticket.sla_status == "breached" or any(value < 0 for value in outcome_diffs):
+    if ticket.first_response_breached or ticket.close_breached or any(value < 0 for value in outcome_diffs):
         return "breached"
     if ticket.state in ("closed", "merged") and outcome_diffs:
         return "closed_on_time"
@@ -378,6 +385,18 @@ def _effective_sla_status(ticket: TicketOut, now: datetime) -> str:
 
 
 def _sla_remaining_ms(ticket: TicketOut, now: datetime) -> int | None:
+    if ticket.state in ("closed", "merged"):
+        # A resolved ticket has no countdown; the meaningful figure is how far it
+        # missed. Reporting deadline-minus-now here would inflate a 6-minute miss
+        # into however long ago the deadline passed.
+        missed = [value for value in _sla_outcome_diffs(ticket) if value < 0]
+        if missed:
+            return min(missed) * 60 * 1000
+        deadline = _sla_deadline(ticket)
+        closed_at = _as_utc(ticket.close_at or ticket.closed_at)
+        if deadline and closed_at and closed_at > deadline:
+            return -int((closed_at - deadline).total_seconds() * 1000)
+        return None
     deadline = _sla_deadline(ticket)
     return int((deadline - now).total_seconds() * 1000) if deadline else None
 
@@ -427,17 +446,15 @@ def _build_sla_monitor(tickets: list[TicketOut], now: datetime | None = None, gr
     rows = []
     for ticket in active:
         deadline = _sla_deadline(ticket)
-        status = _effective_sla_status(ticket, now)
-        data = ticket.model_dump(mode="json")
-        data.update({"actionable_deadline": deadline.isoformat() if deadline else None, "live_sla_status": status, "sla_remaining_ms": _sla_remaining_ms(ticket, now), "sla_progress": _sla_progress(ticket, now)})
+        data = ticket_payload(ticket, now)
+        data.update({"actionable_deadline": deadline.isoformat() if deadline else None, "sla_progress": _sla_progress(ticket, now)})
         rows.append(data)
 
     closed_rows = []
     for ticket in closed:
         deadline = _sla_deadline(ticket)
-        status = _effective_sla_status(ticket, now)
-        data = ticket.model_dump(mode="json")
-        data.update({"actionable_deadline": deadline.isoformat() if deadline else None, "live_sla_status": status, "sla_remaining_ms": _sla_remaining_ms(ticket, now), "sla_progress": _sla_progress(ticket, now)})
+        data = ticket_payload(ticket, now)
+        data.update({"actionable_deadline": deadline.isoformat() if deadline else None, "sla_progress": _sla_progress(ticket, now)})
         closed_rows.append(data)
 
     summary = _sla_counts(rows)
@@ -491,7 +508,7 @@ def _build_sla_monitor(tickets: list[TicketOut], now: datetime | None = None, gr
         "heatmap": {"grid": grid, "max": max(1, *(value for row in grid for value in row))},
         "tickets": rows,
         "risk_rows": [t for t in rows if t["live_sla_status"] in ("breached", "critical", "warning")],
-        "breach_log": [t.model_dump(mode="json") for t in breach_log],
+        "breach_log": [ticket_payload(t, now) for t in breach_log],
     }
 
 
@@ -530,7 +547,7 @@ async def search_tickets(
     rows.sort(key=lambda t: t.zammad_updated_at, reverse=True)
     total = len(rows)
     page_rows = rows[(page - 1) * per_page : page * per_page]
-    return ApiResponse(data=[t.model_dump(mode="json") for t in page_rows], meta={"page": page, "per_page": per_page, "total": total})
+    return ApiResponse(data=[ticket_payload(t) for t in page_rows], meta={"page": page, "per_page": per_page, "total": total})
 
 
 @router.get("", response_model=ApiResponse)
@@ -566,15 +583,22 @@ async def list_tickets(
     start = (page - 1) * per_page
     page_data = tickets[start : start + per_page]
 
-    return ApiResponse(data=[t.model_dump(mode="json") for t in page_data], meta={"page": page, "per_page": per_page, "total": total})
+    return ApiResponse(data=[ticket_payload(t) for t in page_data], meta={"page": page, "per_page": per_page, "total": total})
 
 
 @router.get("/sla-at-risk", response_model=ApiResponse)
 async def sla_at_risk(current: Annotated[dict, Depends(get_current_user)], db: Annotated[AsyncSession, Depends(get_db)]):
     tickets = await _fetch_scoped(current, db)
-    at_risk = [t for t in tickets if t.sla_status in ("warning", "critical", "breached")]
-    at_risk.sort(key=lambda t: t.first_response_remaining_secs or 999999)
-    return ApiResponse(data=[t.model_dump(mode="json") for t in at_risk[:50]])
+    now = datetime.now(timezone.utc)
+    # At-Risk is about deadlines still ahead: a resolved ticket belongs in the
+    # breach log, and its large negative remaining would otherwise crowd out
+    # the active tickets this list exists to surface.
+    at_risk = [
+        t for t in tickets
+        if t.state in OPEN_STATES and _effective_sla_status(t, now) in ("warning", "critical", "breached")
+    ]
+    at_risk.sort(key=lambda t: _sla_remaining_ms(t, now) if _sla_remaining_ms(t, now) is not None else 10**15)
+    return ApiResponse(data=[ticket_payload(t) for t in at_risk[:50]])
 
 
 @router.get("/sla-monitor", response_model=ApiResponse)
@@ -668,7 +692,7 @@ async def overview(
 
     ticket_dicts = []
     for ticket, last_open_at, last_reopen_at in page_rows:
-        data = ticket.model_dump(mode="json")
+        data = ticket_payload(ticket)
         # Overview-only injected timestamps; the shared ticket schema is untouched.
         if tab == "open":
             data["last_open_at"] = (last_open_at or _as_utc(ticket.zammad_updated_at) or _as_utc(ticket.zammad_created_at)).isoformat()
@@ -697,7 +721,9 @@ async def overview(
 async def get_ticket(ticket_id: int, current: Annotated[dict, Depends(get_current_user)], db: Annotated[AsyncSession, Depends(get_db)]):
     cached = await cache_get(f"ticket:{ticket_id}")
     if cached:
-        return ApiResponse(data=cached)
+        # The cached ticket holds the row's own facts; the live SLA fields are
+        # recomputed here so a cached read cannot disagree with the SLA Monitor.
+        return ApiResponse(data={**cached, "ticket": ticket_payload(TicketOut.model_validate(cached["ticket"]))})
 
     # Read from DB (synced by workers). Backfill from Zammad only on a miss so
     # steady-state reads never hit Zammad, but the UI never 404s on new tickets.
@@ -724,9 +750,12 @@ async def get_ticket(ticket_id: int, current: Annotated[dict, Depends(get_curren
         return ApiResponse(data=None)
 
     ticket = _row_to_ticket(row)
-    result = {"ticket": ticket.model_dump(mode="json"), "articles": [TicketArticleOut.model_validate(a, from_attributes=True).model_dump() for a in articles]}
-    await cache_set(f"ticket:{ticket_id}", result, ttl=60)
-    return ApiResponse(data=result)
+    articles_payload = [TicketArticleOut.model_validate(a, from_attributes=True).model_dump() for a in articles]
+    # Cache the ticket's stored facts; the time-relative SLA fields are
+    # recomputed on every read (cache hits included) so a cached read can never
+    # disagree with the SLA Monitor.
+    await cache_set(f"ticket:{ticket_id}", {"ticket": ticket.model_dump(mode="json"), "articles": articles_payload}, ttl=60)
+    return ApiResponse(data={"ticket": ticket_payload(ticket), "articles": articles_payload})
 
 
 @history_router.get("/ticket_history/{ticket_id}", response_model=ApiResponse)

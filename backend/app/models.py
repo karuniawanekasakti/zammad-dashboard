@@ -34,6 +34,8 @@ class SlaStatus(str, Enum):
     critical = "critical"
     breached = "breached"
     no_sla = "no_sla"
+    on_track = "on_track"
+    closed_on_time = "closed_on_time"
 
 
 # --- Auth ---

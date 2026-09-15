@@ -31,6 +31,16 @@ SYNC_WATERMARK_KEY = "sync:last_ticket_updated_at"
 LAST_RUN_KEY = "sync:last_run"
 LAST_SUCCESS_KEY = "sync:last_successful_checkpoint"
 SCHEDULES_KEY = "sync:schedules"
+WATERMARK_OVERLAP_SECONDS = 60
+
+
+def _watermark_value(finished_at: str, kind: str) -> str:
+    if kind != "incremental":
+        return finished_at
+    # Overlap closes the mid-run search/write race; boundary re-fetches are
+    # harmless because every ticket write is an upsert.
+    finished = datetime.fromisoformat(finished_at.replace("Z", "+00:00"))
+    return (finished - timedelta(seconds=WATERMARK_OVERLAP_SECONDS)).isoformat()
 
 
 def _map_groups(raw_groups: list[dict], raw_users: list[dict]):
@@ -186,10 +196,11 @@ async def run_incremental_sync(progress=None, record_run: bool = True, advance_w
             if progress:
                 await progress("finalizing", {"tickets": len(tickets), "histories": histories})
             await session.commit()
-            # Advance watermark to now, not to a ticket's updated_at (a stale ticket
-            # would pin the watermark to the past and stall future increments).
+            # Advance from now, not a ticket's updated_at (a stale ticket would
+            # pin the watermark to the past and stall future increments).
             if advance_watermark:
-                await set_setting(session, SYNC_WATERMARK_KEY, {"value": datetime.now(timezone.utc).isoformat()})
+                now = datetime.now(timezone.utc).isoformat()
+                await set_setting(session, SYNC_WATERMARK_KEY, {"value": _watermark_value(now, "incremental")})
         return len(tickets)
 
     try:
@@ -340,10 +351,11 @@ async def _complete_operation(operation: dict) -> bool:
                 checkpoint.value = value
             else:
                 session.add(SettingRow(key=LAST_SUCCESS_KEY, value=value))
+            watermark_value = {"value": _watermark_value(operation["finished_at"], operation["kind"])}
             if watermark:
-                watermark.value = value
+                watermark.value = watermark_value
             else:
-                session.add(SettingRow(key=SYNC_WATERMARK_KEY, value=value))
+                session.add(SettingRow(key=SYNC_WATERMARK_KEY, value=watermark_value))
             await session.commit()
             return True
 

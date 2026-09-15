@@ -2,7 +2,7 @@
 
 Covers three defects observed on the Settings page after a manual incremental sync:
   1. Tickets/Users/Groups showed 0/0/0 even though Zammad had changes, because the
-     search query carried a `+00:00` offset that this Zammad silently ignores.
+     search query truncated the watermark or used a bare `>` comparison.
   2. Duration under-reported the run, because the timer started after the queue
      wait instead of spanning the queued_at..finished_at window the UI shows.
   3. Triggered By showed "Scheduled" after a manual trigger, because
@@ -52,13 +52,8 @@ class FakeRedis:
         return None
 
 
-
-from app import tasks
-from app.zammad_client import ZammadClient
-
-
-def check_search_query_omits_timezone_offset() -> None:
-    """A `+00:00`/`Z` suffix in updated_at makes this Zammad return [] silently."""
+def check_search_query_uses_full_bracketed_watermark() -> None:
+    """Both ticket fetch paths preserve the full watermark in a bracket range."""
     import httpx
 
     seen: list[httpx.Request] = []
@@ -72,18 +67,22 @@ def check_search_query_omits_timezone_offset() -> None:
         transport=httpx.MockTransport(handler), base_url="https://zammad.test"
     )
 
+    watermark = "2026-09-15T04:00:00.123456+00:00"
+
     async def run() -> None:
-        await client.get_all_tickets(per_page=25, updated_since="2026-09-14T06:37:08.147021+00:00")
-        await client.get_tickets(per_page=25, updated_since="2026-09-14T06:37:08.147021+00:00")
+        await client.get_all_tickets(per_page=25, updated_since=watermark)
+        await client.get_tickets(per_page=25, updated_since=watermark)
 
     asyncio.run(run())
 
     assert len(seen) == 2, "both ticket fetch paths must issue a search request"
+    expected = f"updated_at:[{watermark} TO *]"
     for request in seen:
         query = request.url.params["query"]
         assert request.url.path == "/api/v1/tickets/search", query
-        assert query == "updated_at:>2026-09-14", f"watermark must reach Zammad as a date, got {query!r}"
-        assert "+" not in query and not query.endswith("Z"), f"offset suffix must not be sent, got {query!r}"
+        assert query == expected, f"full watermark must reach Zammad in a bracket range, got {query!r}"
+        assert not query.startswith("updated_at:>2026-09-15"), f"bare-date comparison must not be emitted, got {query!r}"
+        assert query != f"updated_at:>{watermark}", f"unescaped full timestamp must not be emitted, got {query!r}"
 
 
 def check_managed_run_owns_the_record() -> None:
@@ -91,6 +90,7 @@ def check_managed_run_owns_the_record() -> None:
     from app import sync_operation
 
     written: list[tuple[str, dict]] = []
+    rows: dict[str, tasks.SettingRow] = {}
 
     async def fake_set_setting(_session, key, value):
         written.append((key, value))
@@ -98,7 +98,6 @@ def check_managed_run_owns_the_record() -> None:
     original_set_setting = tasks.set_setting
     original_with_engine = tasks._with_engine
     original_incremental = tasks.run_incremental_sync
-    original_complete = tasks._complete_operation
     original_write = tasks._write_operation
 
     class Session:
@@ -106,6 +105,15 @@ def check_managed_run_owns_the_record() -> None:
             return self
 
         async def __aexit__(self, *_args):
+            return None
+
+        async def get(self, _model, key):
+            return rows.get(key)
+
+        def add(self, row):
+            rows[row.key] = row
+
+        async def commit(self):
             return None
 
     async def fake_with_engine(coro):
@@ -116,19 +124,13 @@ def check_managed_run_owns_the_record() -> None:
         assert advance_watermark is False, "the managed path advances the watermark itself"
         return {"synced": 3, "updated_since": "2026-09-14"}
 
-    completed: list[dict] = []
-
-    async def fake_complete(record):
-        completed.append(record)
-        return True
-
-    async def fake_write(_operation, _operation_id=None):
+    async def fake_write(operation, _operation_id=None):
+        rows[tasks.LAST_RUN_KEY] = tasks.SettingRow(key=tasks.LAST_RUN_KEY, value=operation)
         return True
 
     tasks.set_setting = fake_set_setting
     tasks._with_engine = fake_with_engine
     tasks.run_incremental_sync = fake_run_incremental
-    tasks._complete_operation = fake_complete
     tasks._write_operation = fake_write
 
     queued_at = datetime.now(timezone.utc) - timedelta(seconds=10)
@@ -137,6 +139,7 @@ def check_managed_run_owns_the_record() -> None:
         claim = asyncio.run(sync_operation.acquire(redis, "incremental", "manual", operation_id="telemetry-op"))
         assert claim is not None, "a manual incremental run must claim the operation slot"
         operation = dict(claim.operation, queued_at=queued_at.isoformat())
+        rows[tasks.LAST_RUN_KEY] = tasks.SettingRow(key=tasks.LAST_RUN_KEY, value=operation)
 
         asyncio.run(
             tasks._execute_managed_sync(
@@ -150,11 +153,10 @@ def check_managed_run_owns_the_record() -> None:
         tasks.set_setting = original_set_setting
         tasks._with_engine = original_with_engine
         tasks.run_incremental_sync = original_incremental
-        tasks._complete_operation = original_complete
         tasks._write_operation = original_write
 
-    assert len(completed) == 1, "the managed run must record exactly one authoritative result"
-    record = completed[0]
+    record = rows[tasks.LAST_RUN_KEY].value
+    assert record["status"] == "succeeded", "the managed run must record one authoritative result"
     assert record["source"] == "manual", f"a manual run must stay manual, got {record['source']!r}"
     assert record["triggered_by"] == "manual", f"triggered_by must not be hardcoded, got {record['triggered_by']!r}"
     assert record["tickets"] == 3, f"the synced ticket count must be recorded, got {record['tickets']!r}"
@@ -162,6 +164,13 @@ def check_managed_run_owns_the_record() -> None:
         f"duration must include the queue wait so it matches the shown timestamps, got {record['duration_secs']}"
     )
     assert record["finished_at"], "a completed run must carry finished_at"
+    finished_at = datetime.fromisoformat(record["finished_at"])
+    checkpoint = datetime.fromisoformat(rows[tasks.LAST_SUCCESS_KEY].value["value"])
+    watermark = datetime.fromisoformat(rows[tasks.SYNC_WATERMARK_KEY].value["value"])
+    assert checkpoint == finished_at, "freshness checkpoint must equal the true finish time"
+    assert watermark == finished_at - timedelta(seconds=tasks.WATERMARK_OVERLAP_SECONDS), (
+        "managed incremental watermark must overlap the next search window by 60 seconds"
+    )
 
     assert not [value for name, value in written if name == tasks.LAST_RUN_KEY], (
         "the runner must not race the authoritative telemetry write"
@@ -184,7 +193,7 @@ def check_duration_spans_queue_to_finish() -> None:
 
 
 if __name__ == "__main__":
-    check_search_query_omits_timezone_offset()
+    check_search_query_uses_full_bracketed_watermark()
     check_managed_run_owns_the_record()
     check_duration_spans_queue_to_finish()
     print("check_sync_telemetry: OK")

@@ -7,13 +7,8 @@ from app.config import settings
 
 
 def _search_query(updated_since: str) -> str:
-    """Build the Zammad search query for an incremental watermark.
-
-    This Zammad silently returns [] for a query whose datetime carries a
-    timezone offset ("+00:00") or "Z" suffix, so the watermark is sent at
-    date granularity. All writes are upserts, so the wider window is safe.
-    """
-    return f"updated_at:>{updated_since[:10]}"
+    """Build the Zammad search query for an incremental watermark."""
+    return f"updated_at:[{updated_since} TO *]"
 
 
 class ZammadClient:

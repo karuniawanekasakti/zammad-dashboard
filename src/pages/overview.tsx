@@ -23,7 +23,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { PriorityBadge, StateBadge } from "@/components/status-badges";
+import { SeverityBadge, StateBadge } from "@/components/status-badges";
 import { formatNumber } from "@/lib/utils";
 import type { OverviewPeriod, OverviewTab, Ticket } from "@/types";
 
@@ -49,6 +49,9 @@ const PERIODS: { value: OverviewPeriod; label: string }[] = [
   { value: "week", label: "Week" },
   { value: "day", label: "Day" },
 ];
+
+// Mirrors the Records table columns, so the exported file matches the screen.
+export const EXPORT_HEADERS = ["Number", "Title", "State", "Severity", "Group", "Agent", "Created", "Closed", "Open"];
 
 type Metric = (typeof METRICS)[number]["key"];
 
@@ -94,8 +97,7 @@ export default function OverviewPage() {
 
   const downloadCsv = async () => {
     const exportData = await api.getOverview(scope, { period, year, month, week, day, group_id: groupFilter, owner_id: agentFilter, tab: tableMetric, page: 1, page_size: EXPORT_SIZE });
-    const header = ["Number", "Title", "State", "Priority", "Group", "Agent", "Created", "Closed", "Open"];
-    const lines = [header, ...exportData.tickets.map(csvRow)].map((row) => row.map(csvCell).join(","));
+    const lines = [EXPORT_HEADERS, ...exportData.tickets.map(csvRow)].map((row) => row.map(csvCell).join(","));
     const url = URL.createObjectURL(new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" }));
     const link = document.createElement("a");
     link.href = url;
@@ -231,7 +233,7 @@ export default function OverviewPage() {
                   <TableHead>#</TableHead>
                   <TableHead>Title</TableHead>
                   <TableHead>State</TableHead>
-                  <TableHead>Priority</TableHead>
+                  <TableHead>Severity</TableHead>
                   <TableHead>Group</TableHead>
                   <TableHead>Agent</TableHead>
                   <TableHead>Date</TableHead>
@@ -249,7 +251,7 @@ export default function OverviewPage() {
                     <TableCell className="font-mono text-xs">#{ticket.number}</TableCell>
                     <TableCell className="max-w-md truncate font-medium">{ticket.title}</TableCell>
                     <TableCell><StateBadge state={ticket.state} /></TableCell>
-                    <TableCell><PriorityBadge priority={ticket.priority} /></TableCell>
+                    <TableCell><SeverityBadge severity={ticket.severity} label={ticket.severity_label} /></TableCell>
                     <TableCell>{ticket.group_name}</TableCell>
                     <TableCell>{ticket.owner_name ?? <span className="text-muted-foreground">Unassigned</span>}</TableCell>
                     <TableCell className="text-xs text-muted-foreground">{dateFor(ticket, tableMetric)}</TableCell>
@@ -332,12 +334,12 @@ function weekInputValue(date: Date) {
   return `${d.getUTCFullYear()}-W${String(week).padStart(2, "0")}`;
 }
 
-function csvRow(ticket: Ticket) {
+export function csvRow(ticket: Ticket) {
   return [
     ticket.number,
     ticket.title,
     ticket.state,
-    ticket.priority,
+    ticket.severity_label ?? ticket.severity ?? "",
     ticket.group_name,
     ticket.owner_name ?? "Unassigned",
     ticket.zammad_created_at,

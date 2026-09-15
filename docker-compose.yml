@@ -35,10 +35,12 @@ services:
   beat:
     build: ./backend
     <<: *backend-env
-    command: celery -A app.celery_app:celery beat --loglevel=info
+    command: celery -A app.celery_app:celery beat --loglevel=info --schedule /var/lib/celery/celerybeat-schedule
     depends_on:
       redis:
         condition: service_healthy
+    volumes:
+      - beat_schedule:/var/lib/celery
     restart: unless-stopped
 
   db:
@@ -74,3 +76,4 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  beat_schedule:

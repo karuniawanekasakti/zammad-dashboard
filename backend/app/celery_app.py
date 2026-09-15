@@ -84,7 +84,8 @@ class RedisScheduler(PersistentScheduler):
             r.close()
             if not raw:
                 return
-            self.update_from_dict(_beat_entries_for(json.loads(raw)))
+            # Preserve each entry's last-run clock and count so long intervals stay reachable across restarts.
+            self.merge_inplace(_beat_entries_for(json.loads(raw)))
         except Exception:
             pass
 

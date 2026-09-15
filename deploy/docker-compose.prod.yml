@@ -21,6 +21,8 @@ services:
 
   beat:
     <<: *prod-backend-env
+    volumes:
+      - beat_schedule:/var/lib/celery
 
   db:
     environment:
@@ -55,3 +57,6 @@ services:
     depends_on:
       - api
     restart: unless-stopped
+
+volumes:
+  beat_schedule:

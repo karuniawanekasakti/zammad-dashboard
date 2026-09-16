@@ -102,10 +102,6 @@ def _map_ticket(t: dict) -> TicketOut:
     close_deadline = _parse_zammad_dt(t.get("close_escalation_at") or t.get("solution_escalation_at") or t.get("sla_solution_at"))
     first_response_diff = _int_or_none(t.get("first_response_diff_in_min"))
     close_diff = _int_or_none(t.get("close_diff_in_min"))
-    first_response_satisfied = bool(first_response_at or (first_response_diff is not None and first_response_diff >= 0))
-    fallback_deadlines = [value for value in (update_deadline, close_deadline) if value]
-    deadline = escalation_at or (first_response_deadline if not first_response_satisfied else None) or (min(fallback_deadlines) if fallback_deadlines else None)
-    remaining = int((deadline - now).total_seconds()) if deadline else None
     first_response_breached = first_response_diff < 0 if first_response_diff is not None else bool(
         first_response_at and first_response_deadline and first_response_at > first_response_deadline
         or not first_response_at and first_response_deadline and first_response_deadline < now
@@ -138,10 +134,6 @@ def _map_ticket(t: dict) -> TicketOut:
         owner_name=_expanded_name(t.get("owner")),
         customer_name=_expanded_name(t.get("customer"), str(t.get("customer_id") or "")) or "",
         tags=t.get("tags") if isinstance(t.get("tags"), list) else [],
-        # The tickets.sla_status column is still NOT NULL with no server
-        # default; the live verdict is derived on read, so nothing meaningful
-        # is written here. Dropping the column is issue #34.
-        sla_status="no_sla",
         escalation_at=escalation_at,
         first_response_at=first_response_at,
         first_response_escalation_at=first_response_deadline,
@@ -153,7 +145,6 @@ def _map_ticket(t: dict) -> TicketOut:
         close_diff_in_min=close_diff,
         update_escalation_at=update_deadline,
         update_diff_in_min=update_diff,
-        first_response_remaining_secs=remaining,
         first_response_breached=first_response_breached,
         close_breached=close_breached,
         reopen_count=t.get("reopen_count", 0),
@@ -221,11 +212,11 @@ def ticket_payload(ticket: TicketOut, now: datetime | None = None) -> dict:
     The verdict and countdown are derived here from the ticket's own Zammad
     facts and the present moment — never stored, never read back — so every
     surface that serializes a ticket agrees with every other. The stored
-    verdict fields are dropped from the payload so nothing can read them.
+    verdict fields no longer exist in the schema, so nothing can read them.
     """
     now = now or datetime.now(timezone.utc)
     return {
-        **ticket.model_dump(mode="json", exclude={"sla_status", "first_response_remaining_secs"}),
+        **ticket.model_dump(mode="json"),
         "live_sla_status": _effective_sla_status(ticket, now),
         "sla_remaining_ms": _sla_remaining_ms(ticket, now),
     }

@@ -4,17 +4,41 @@ The reported bug was one ticket showing `Breached` on the SLA Monitor and
 `On Track` on its detail page at the same moment, because the Monitor
 recomputed a verdict while the detail page rendered the verdict stored at
 last sync. The verdict is now derived at read time in the one serialization
-seam every surface goes through, and the stored verdict is no longer exposed.
+seam every surface goes through, and the stored verdict is gone from the
+synchronized store entirely — so no stale verdict is available to read by
+accident.
 """
 from datetime import datetime, timedelta, timezone
 
 from app.db_models import TicketRow
+from app.models import TicketOut
 from app.routers.tickets import (
     _build_sla_monitor,
     _effective_sla_status,
+    _map_ticket,
     _row_to_ticket,
     _sla_remaining_ms,
     ticket_payload,
+)
+
+STORED_DERIVED_FIELDS = ("sla_status", "first_response_remaining_secs")
+
+# Zammad's own SLA facts, which are evidence rather than verdicts and must
+# survive on a synced row: the live computation reads every one of them.
+RETAINED_SLA_FACTS = (
+    "escalation_at",
+    "first_response_at",
+    "first_response_escalation_at",
+    "first_response_in_min",
+    "first_response_diff_in_min",
+    "close_at",
+    "close_escalation_at",
+    "close_in_min",
+    "close_diff_in_min",
+    "update_escalation_at",
+    "update_diff_in_min",
+    "first_response_breached",
+    "close_breached",
 )
 
 def row(id_: int, now: datetime, **overrides) -> TicketRow:
@@ -33,9 +57,7 @@ def row(id_: int, now: datetime, **overrides) -> TicketRow:
         "owner_name": None,
         "customer_name": "Customer",
         "tags": [],
-        "sla_status": "safe",
         "escalation_at": now - timedelta(minutes=5),
-        "first_response_remaining_secs": 999,
         "first_response_breached": False,
         "close_breached": False,
         "reopen_count": 0,
@@ -56,12 +78,52 @@ def main() -> None:
     assert detail["live_sla_status"] == monitor["live_sla_status"] == "breached"
     assert detail["sla_remaining_ms"] == monitor["sla_remaining_ms"]
     assert "live_sla_status" in detail and "sla_remaining_ms" in detail
-    assert "sla_status" not in detail and "first_response_remaining_secs" not in detail
 
-    # The stored verdict is not an input: a row flagged breached at last sync
-    # with a future deadline and no Zammad breach evidence is not breached.
-    stale_breach = _row_to_ticket(row(2, now, sla_status="breached", escalation_at=now + timedelta(hours=4)))
-    assert ticket_payload(stale_breach, now)["live_sla_status"] == "on_track"
+    # The stored verdict columns are gone from both the row model and the API
+    # schema, so no reader anywhere can depend on them.
+    for field in STORED_DERIVED_FIELDS:
+        assert field not in TicketRow.__table__.columns, field
+        assert field not in TicketOut.model_fields, field
+        assert field not in detail, field
+        assert field not in ticket_payload(stale, now), field
+
+    # A verdict-shaped value on the incoming Zammad payload is ignored: the
+    # write path no longer supplies either derived field, so even a payload
+    # carrying them cannot reintroduce a stored verdict.
+    mapped = _map_ticket({
+        "id": 999,
+        "escalation_at": (now + timedelta(hours=4)).isoformat(),
+        "sla_status": "breached",
+        "first_response_remaining_secs": -12345,
+    })
+    for field in STORED_DERIVED_FIELDS:
+        assert field not in mapped.model_dump(), field
+    assert ticket_payload(mapped, now)["live_sla_status"] == "on_track"
+
+    # A synced ticket still carries every Zammad SLA fact the live
+    # computation reads; only the derived verdict and countdown were dropped.
+    mapped_facts = _map_ticket({
+        "id": 998,
+        "escalation_at": (now + timedelta(hours=4)).isoformat(),
+        "first_response_at": (now - timedelta(hours=3)).isoformat(),
+        "first_response_escalation_at": (now - timedelta(hours=4)).isoformat(),
+        "first_response_in_min": 60,
+        "first_response_diff_in_min": 60,
+        "close_at": (now - timedelta(hours=1)).isoformat(),
+        "close_escalation_at": (now + timedelta(hours=2)).isoformat(),
+        "close_in_min": 180,
+        "close_diff_in_min": 120,
+        "update_escalation_at": (now + timedelta(hours=1)).isoformat(),
+        "update_diff_in_min": 30,
+    })
+    dumped = mapped_facts.model_dump()
+    for field in RETAINED_SLA_FACTS:
+        assert field in dumped and dumped[field] is not None, field
+    assert dumped["first_response_breached"] is False
+    assert dumped["close_breached"] is False
+
+    # The retained facts are enough to compute the live verdict on read.
+    assert ticket_payload(mapped_facts, now)["live_sla_status"] == "on_track"
 
     # A ticket closed late reports its real breach magnitude, not how long ago
     # the deadline passed.

@@ -28,16 +28,6 @@ class TicketPriority(str, Enum):
     unknown = "unknown"
 
 
-class SlaStatus(str, Enum):
-    safe = "safe"
-    warning = "warning"
-    critical = "critical"
-    breached = "breached"
-    no_sla = "no_sla"
-    on_track = "on_track"
-    closed_on_time = "closed_on_time"
-
-
 # --- Auth ---
 class LoginRequest(BaseModel):
     login: str
@@ -81,7 +71,6 @@ class TicketOut(BaseModel):
     owner_name: str | None
     customer_name: str
     tags: list[str]
-    sla_status: SlaStatus
     escalation_at: datetime | None = None
     first_response_at: datetime | None = None
     first_response_escalation_at: datetime | None = None
@@ -93,7 +82,6 @@ class TicketOut(BaseModel):
     close_diff_in_min: int | None = None
     update_escalation_at: datetime | None = None
     update_diff_in_min: int | None = None
-    first_response_remaining_secs: int | None
     first_response_breached: bool
     close_breached: bool
     reopen_count: int

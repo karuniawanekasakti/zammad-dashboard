@@ -20,8 +20,6 @@ def ticket(id_: int, title: str, owner_id: str | None, priority: str, updated: s
         owner_name="Agent" if owner_id else None,
         customer_name="Customer",
         tags=[],
-        sla_status="safe",
-        first_response_remaining_secs=None,
         first_response_breached=False,
         close_breached=False,
         reopen_count=0,

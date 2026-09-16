@@ -29,8 +29,6 @@ def make_ticket(id_: int, state: str, updated_at: datetime) -> TicketOut:
         owner_name=None,
         customer_name="Customer",
         tags=[],
-        sla_status="safe",
-        first_response_remaining_secs=None,
         first_response_breached=False,
         close_breached=False,
         reopen_count=0,

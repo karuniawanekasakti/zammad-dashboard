@@ -34,8 +34,8 @@ def make_ticket(id_: int, state: str, created: datetime, updated: datetime, clos
     return TicketOut(
         id=str(id_), zammad_id=id_, number=str(id_), title=f"Ticket {id_}", state=state,
         priority="normal", group_id="1", group_name="Support", owner_id=None, owner_name=None,
-        customer_name="Customer", tags=[], sla_status="safe",
-        first_response_remaining_secs=None, first_response_breached=False, close_breached=False,
+        customer_name="Customer", tags=[],
+        first_response_breached=False, close_breached=False,
         reopen_count=0, first_reply_time_secs=None, resolution_time_secs=None,
         zammad_created_at=created, zammad_updated_at=updated, closed_at=closed,
     )

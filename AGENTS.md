@@ -37,7 +37,7 @@ React (React Query + Zustand) ←── WebSocket /ws/{room} for live invalidati
 
 **Role scoping** is enforced in backend code (e.g. `_scope_filter` in `tickets.py`): admin sees all; agent sees own tickets; team_lead/project_manager see their `group_ids`. The JWT carries `role` + `group_ids`.
 
-**Sync watermark**: `settings` table key `sync:last_ticket_updated_at`. Incremental sync pulls tickets `updated_at > watermark` then advances the watermark to *now* (not a ticket's timestamp — a stale ticket would pin it to the past). `sync:last_run` stores telemetry shown on the Settings page.
+**Sync watermark**: `settings` table key `sync:last_ticket_updated_at`. Incremental sync searches `updated_at:[<watermark> TO *]` (an inclusive bracketed range — see `docs/adr/0002-incremental-watermark-query.md`), then advances the watermark to the moment its ticket fetch began minus `WATERMARK_OVERLAP_SECONDS`, the deliberate overlap that keeps a ticket changed mid-run from being skipped (see `docs/adr/0004-full-reconcile-watermark-anchor.md`). It is never a ticket's own timestamp — a stale ticket would pin it to the past. `sync:last_run` stores telemetry shown on the Settings page.
 
 **Auth**: login proxies credentials to Zammad `users/me?expand=true`, maps Zammad roles/note/group-perms to internal `admin | team_lead | project_manager | agent` (`_map_role` in `routers/auth.py`), mints a JWT. There is no separate user store — users are upserted into Postgres from Zammad.
 
@@ -87,6 +87,7 @@ The backend has no pytest/unittest; verification is via runnable scripts and ass
 docker compose exec api python check_sync.py            # full sync + verifies DB counts > 0
 docker compose exec api python check_ticket_sorting.py  # monkeypatches tickets.py, asserts list order
 docker compose exec api python check_sync_telemetry.py  # sync summary: watermark, source, duration
+docker compose exec api python check_sla_staleness.py   # dataset staleness bounds + one verdict per ticket
 ```
 
 `check_sync_telemetry.py` covers the Settings sync summary: it asserts the incremental watermark reaches Zammad in a form its search cannot misparse — an inclusive bracketed range (`updated_at:[<watermark> TO *]`), not a bare-date `>` comparison (a bare date is read in the instance's timezone and `>` rounds up past the current day, while an unescaped `:` is parsed as a field separator; both fail silently with an empty result) — that a managed run records its real `source` rather than a hardcoded one, and that `duration_secs` spans the whole run.
@@ -98,6 +99,8 @@ docker compose exec api python check_sync_telemetry.py  # sync summary: watermar
 `check_sla_freshness.py` is the regression check for the stale-dataset bug: it asserts the SLA Monitor response carries Data freshness for every role that can view it (admin, team lead, project manager, agent) without widening the administrator-only `/settings` endpoint — whose route dependency still rejects an agent with 403 while accepting an admin — and that freshness classifies Never Synced / Up to Date / Out of Date from the checkpoint, falling back to the sync watermark. The verdict rows still ride along in the payload when the dataset is stale (degrading them to Unavailable is the frontend's job), so the check pins that boundary too.
 
 `check_beat_schedule.py` asserts that a scheduler refresh applies a changed interval while preserving each existing entry's `last_run_at` and `total_run_count`, and that a Full Reconcile whose interval has elapsed is still due after a refresh.
+
+`check_sla_staleness.py` asserts the staleness bounds against the live synced store, each catching a different way the dataset goes stale: (1) dataset freshness must be Up to Date, (2) a sample of synced rows must carry Zammad's own `updated_at` — a row whose facts differ from Zammad's, by more than one sync window, is a ticket left behind — and (3) a run that reports success while fetching nothing only fails once rows are corroborated behind. It also re-samples the freshest real rows to assert one verdict and one countdown across the detail and SLA Monitor paths, and — for the reported ticket `20260914410002` — that a closed ticket is absent from the SLA Monitor's active list, appears in its breach log with the same figure, and states its real breach magnitude rather than a countdown. It exits non-zero on a violation, so a future silent stall fails this check instead of being found by a user. Run it after a Full Reconcile to verify the backfill; it is expected to fail on a stalled dataset.
 
 ## Not implemented yet (per PRD)
 

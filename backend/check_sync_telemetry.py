@@ -8,6 +8,11 @@ Covers three defects observed on the Settings page after a manual incremental sy
   3. Triggered By showed "Scheduled" after a manual trigger, because
      `_record_last_run` hardcoded `triggered_by: "beat"`.
 
+It also pins the watermark's anchor per kind: a Full Reconcile must anchor to the
+start of its ticket fetch (minus the overlap), so a ticket changed during its
+long history phase is not skipped by the next run. See
+docs/adr/0004-full-reconcile-watermark-anchor.md.
+
 Run inside the api container or backend venv: python check_sync_telemetry.py
 """
 import asyncio
@@ -177,6 +182,33 @@ def check_managed_run_owns_the_record() -> None:
     )
 
 
+def check_watermark_anchor_covers_a_long_run() -> None:
+    """Both sync kinds anchor the next window to their fetch, not their finish.
+
+    Both fetch tickets in their first phase and may then spend arbitrary time
+    syncing per-ticket histories. Anchoring the next incremental window to
+    finished_at would skip every ticket changed during that span — the reported
+    tickets were lost that way. The anchor is the recorded fetch moment, and both
+    kinds carry the overlap.
+    """
+    finished = "2026-09-16T08:13:27.167653+00:00"
+    fetched = "2026-09-16T07:48:45.196846+00:00"
+    expected = datetime.fromisoformat(fetched) - timedelta(seconds=tasks.WATERMARK_OVERLAP_SECONDS)
+
+    for kind in ("full", "incremental"):
+        operation = {"kind": kind, "watermark_at": fetched, "started_at": fetched, "finished_at": finished}
+        anchored = tasks._watermark_value(tasks._watermark_anchor(operation))
+        assert datetime.fromisoformat(anchored) == expected, (
+            f"a {kind} watermark must anchor to its fetch start minus the overlap, got {anchored}"
+        )
+
+    # An operation recorded before the fetch stamp existed falls back to its
+    # finished_at rather than raising into the sync path.
+    legacy = {"kind": "incremental", "finished_at": finished}
+    assert tasks._watermark_value(tasks._watermark_anchor(legacy)) == (
+        datetime.fromisoformat(finished) - timedelta(seconds=tasks.WATERMARK_OVERLAP_SECONDS)
+    ).isoformat(), "a legacy operation must fall back to finished_at"
+
 def check_duration_spans_queue_to_finish() -> None:
     """Duration must be wall-clock over queued_at..finished_at, not a partial timer."""
     # A run that waited 10s for a worker slot and then took 84s must report ~94s,
@@ -195,5 +227,6 @@ def check_duration_spans_queue_to_finish() -> None:
 if __name__ == "__main__":
     check_search_query_uses_full_bracketed_watermark()
     check_managed_run_owns_the_record()
+    check_watermark_anchor_covers_a_long_run()
     check_duration_spans_queue_to_finish()
     print("check_sync_telemetry: OK")

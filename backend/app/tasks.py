@@ -34,13 +34,25 @@ SCHEDULES_KEY = "sync:schedules"
 WATERMARK_OVERLAP_SECONDS = 60
 
 
-def _watermark_value(finished_at: str, kind: str) -> str:
-    if kind != "incremental":
-        return finished_at
-    # Overlap closes the mid-run search/write race; boundary re-fetches are
-    # harmless because every ticket write is an upsert.
-    finished = datetime.fromisoformat(finished_at.replace("Z", "+00:00"))
+def _watermark_value(anchor: str) -> str:
+    # Overlap closes the mid-run search/write race: a ticket changed between the
+    # search snapshot and the watermark write would otherwise be missed by every
+    # subsequent run. Boundary re-fetches are harmless because every ticket write
+    # is an upsert. The anchor is when the ticket fetch began — for a Full
+    # Reconcile that is the run's start, not its finish.
+    finished = datetime.fromisoformat(anchor.replace("Z", "+00:00"))
     return (finished - timedelta(seconds=WATERMARK_OVERLAP_SECONDS)).isoformat()
+
+def _watermark_anchor(operation: dict) -> str:
+    """When a managed run's ticket fetch began, for the watermark bound.
+
+    Both kinds fetch tickets in their first phase and may then spend arbitrary
+    time syncing histories before finishing, so the next window is anchored to
+    the fetch — recorded as `watermark_at` — not the run's finish. Anchoring to
+    the finish skips every ticket changed in between. Older operations without
+    the stamp fall back to finished_at.
+    """
+    return operation.get("watermark_at") or operation["finished_at"]
 
 
 def _map_groups(raw_groups: list[dict], raw_users: list[dict]):
@@ -177,6 +189,7 @@ async def run_incremental_sync(progress=None, record_run: bool = True, advance_w
         async with session_factory() as session:
             if progress:
                 await progress("fetching_tickets")
+            fetch_started_at = datetime.now(timezone.utc).isoformat()
             setting = await get_setting(session, SYNC_WATERMARK_KEY)
             if setting:
                 updated_since = setting.get("value")
@@ -196,11 +209,11 @@ async def run_incremental_sync(progress=None, record_run: bool = True, advance_w
             if progress:
                 await progress("finalizing", {"tickets": len(tickets), "histories": histories})
             await session.commit()
-            # Advance from now, not a ticket's updated_at (a stale ticket would
-            # pin the watermark to the past and stall future increments).
+            # Advance from the moment the fetch began, not a ticket's updated_at
+            # (a stale ticket would pin the watermark to the past and stall
+            # future increments), minus the overlap that closes the run's race.
             if advance_watermark:
-                now = datetime.now(timezone.utc).isoformat()
-                await set_setting(session, SYNC_WATERMARK_KEY, {"value": _watermark_value(now, "incremental")})
+                await set_setting(session, SYNC_WATERMARK_KEY, {"value": _watermark_value(fetch_started_at)})
         return len(tickets)
 
     try:
@@ -227,6 +240,11 @@ async def run_full_sync(progress=None, record_run: bool = True, advance_watermar
     async def _do(session_factory):
         if progress:
             await progress("fetching_tickets")
+        # The watermark advances to the moment the ticket fetch began, not the
+        # run's end: a Full Reconcile spends most of its time syncing histories
+        # after this point, so anchoring to the fetch (minus the overlap) is what
+        # keeps a ticket changed during the run from being skipped.
+        fetch_started_at = datetime.now(timezone.utc).isoformat()
         raw_tickets = await _with_sla_details(await zammad.get_all_tickets(per_page=100))
         if progress:
             await progress("fetching_users", {"tickets": len(raw_tickets)})
@@ -261,7 +279,7 @@ async def run_full_sync(progress=None, record_run: bool = True, advance_watermar
                 await progress("finalizing", {**processed, "histories": histories})
             await session.commit()
             if advance_watermark:
-                await set_setting(session, SYNC_WATERMARK_KEY, {"value": datetime.now(timezone.utc).isoformat()})
+                await set_setting(session, SYNC_WATERMARK_KEY, {"value": _watermark_value(fetch_started_at)})
 
         counts.update(tickets=len(tickets), users=len(users), groups=len(groups))
         return counts
@@ -351,7 +369,7 @@ async def _complete_operation(operation: dict) -> bool:
                 checkpoint.value = value
             else:
                 session.add(SettingRow(key=LAST_SUCCESS_KEY, value=value))
-            watermark_value = {"value": _watermark_value(operation["finished_at"], operation["kind"])}
+            watermark_value = {"value": _watermark_value(_watermark_anchor(operation))}
             if watermark:
                 watermark.value = watermark_value
             else:
@@ -419,6 +437,12 @@ async def _execute_managed_sync(*, kind: str, operation: dict, lease_value: str,
         completed: int | None = None,
         known_total: int | None = None,
     ) -> None:
+        # The ticket fetch is the first phase of both kinds, so stamping it here
+        # records when the run's data could first be stale. The next watermark is
+        # anchored to this instant, not the run's finish — a Full Reconcile spends
+        # most of its run syncing histories afterwards.
+        if phase == "fetching_tickets" and not operation.get("watermark_at"):
+            operation["watermark_at"] = utcnow().isoformat()
         await update_operation(phase, processed, completed, known_total)
 
     async def heartbeat() -> None:

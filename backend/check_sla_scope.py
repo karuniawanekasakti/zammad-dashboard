@@ -47,8 +47,12 @@ async def main() -> None:
     async def fake_list_group_rows(_db):
         return [SimpleNamespace(id="g1", name="Group g1"), SimpleNamespace(id="g2", name="Group g2")]
 
+    async def fake_get_setting(_db, _key):
+        return None
+
     tickets.list_ticket_rows = fake_list_ticket_rows
     tickets.list_group_rows = fake_list_group_rows
+    tickets.get_setting = fake_get_setting
     tickets._row_to_ticket = lambda row: row
 
     roles = {
@@ -68,6 +72,10 @@ async def main() -> None:
         for group_id in (None, "all"):
             response = await tickets.sla_monitor(current=current, db=object(), group_id=group_id, priority=None)
             assert {row["id"] for row in response.data["tickets"]} == expected_all[role]
+            # Data freshness rides on the response every role can already
+            # fetch, so a stale dataset is visible to whoever views the SLA
+            # surfaces rather than only to an administrator.
+            assert response.data["freshness"]["status"] == "never_synced", role
 
     admin = await tickets.sla_monitor(current=roles["admin"], db=object(), group_id="all", priority=None)
     assert next(row for row in admin.data["sla_rows"] if row["id"] == "g-missing")["name"] == "Unknown"

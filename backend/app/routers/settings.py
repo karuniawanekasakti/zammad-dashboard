@@ -11,6 +11,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings as app_settings
 from app.deps import get_db, get_redis, require_roles
+
+# The freshness vocabulary lives in app.freshness so the Settings surfaces and the
+# SLA Monitor can never disagree about whether the dataset is stale. These names
+# stay importable from here because app.tasks and the settings self-checks use them.
+from app.freshness import DEFAULT_SCHEDULES, FRESHNESS_GRACE_SECONDS, LAST_SUCCESS_KEY, SCHEDULES_KEY, SYNC_WATERMARK_KEY, freshness as _freshness, parse_datetime as _parse_datetime, read_checkpoint
 from app.models import ApiResponse, Role
 from app.repositories import get_setting, set_setting
 from app.sync_operation import acquire, current as current_operation, new_operation, project
@@ -18,18 +23,12 @@ from app.zammad_client import zammad
 
 router = APIRouter()
 
-SCHEDULES_KEY = "sync:schedules"
 LAST_RUN_KEY = "sync:last_run"
-LAST_SUCCESS_KEY = "sync:last_successful_checkpoint"
-SYNC_WATERMARK_KEY = "sync:last_ticket_updated_at"
-FRESHNESS_GRACE_SECONDS = 120
 PROBE_CACHE_SECONDS = 15
 _probe_snapshot: dict | None = None
 
 MIN_SECONDS = 30
 MAX_SECONDS = 86400 * 7
-
-DEFAULT_SCHEDULES = {"incremental_seconds": 300, "full_reconcile_seconds": 21600}
 
 
 class SchedulesIn(BaseModel):
@@ -46,15 +45,6 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _parse_datetime(value: str | None) -> datetime | None:
-    if not value:
-        return None
-    try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    return parsed.replace(tzinfo=parsed.tzinfo or timezone.utc)
-
 
 def _normalize_last_run(last_run: dict | None) -> dict | None:
     if not last_run:
@@ -66,17 +56,6 @@ def _normalize_last_run(last_run: dict | None) -> dict | None:
     }.get(normalized.get("status"), normalized.get("status"))
     return normalized
 
-
-def _freshness(checkpoint: datetime | None, schedules: dict, now: datetime, checkpoint_source: str | None) -> dict:
-    if checkpoint is None:
-        return {"status": "never_synced", "last_success_at": None, "checkpoint_source": None}
-    stale_after = checkpoint + timedelta(seconds=int(schedules.get("incremental_seconds", DEFAULT_SCHEDULES["incremental_seconds"])) + FRESHNESS_GRACE_SECONDS)
-    return {
-        "status": "up_to_date" if now <= stale_after else "out_of_date",
-        "last_success_at": checkpoint.isoformat(),
-        "stale_after": stale_after.isoformat(),
-        "checkpoint_source": checkpoint_source,
-    }
 
 
 def _automatic_status(sync_status: dict, probes: dict, now: datetime) -> dict:
@@ -110,12 +89,7 @@ def _automatic_status(sync_status: dict, probes: dict, now: datetime) -> dict:
 
 async def _sync_status(db: AsyncSession, now: datetime, redis=None) -> dict:
     schedules = (await get_setting(db, SCHEDULES_KEY)) or DEFAULT_SCHEDULES
-    checkpoint_setting = await get_setting(db, LAST_SUCCESS_KEY)
-    checkpoint_source = "dedicated"
-    if not checkpoint_setting:
-        checkpoint_setting = await get_setting(db, SYNC_WATERMARK_KEY)
-        checkpoint_source = "watermark" if checkpoint_setting else None
-    checkpoint = _parse_datetime(checkpoint_setting.get("value") if checkpoint_setting else None)
+    checkpoint, checkpoint_source = await read_checkpoint(db, get_setting)
     latest_attempt = _normalize_last_run(await get_setting(db, LAST_RUN_KEY))
     active = await current_operation(redis, latest_attempt, now=now) if redis else None
     projected_attempt = project(active or latest_attempt, now)

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createServer } from "vite";
-import { slaDeadline, slaProgress, slaRemainingMs, slaStatus } from "./src/lib/sla-deadline.ts";
+import { slaDeadline, slaProgress, slaRemainingMs, slaStatus, slaVerdictsAvailable } from "./src/lib/sla-deadline.ts";
 import type { Ticket } from "./src/types/index.ts";
 
 const current = "2026-09-08T12:00:00.000Z";
@@ -90,6 +90,12 @@ assert.equal(slaStatus(ticket(null), now), "no_sla");
 assert.equal(slaRemainingMs(ticket("2026-09-08T12:00:00.000Z"), now), 4 * 60 * 60 * 1000);
 assert.equal(slaProgress(ticket("2026-09-08T12:00:00.000Z"), now), 50);
 
+assert.equal(slaVerdictsAvailable({ status: "up_to_date" }), true);
+assert.equal(slaVerdictsAvailable({ status: "out_of_date" }), false);
+assert.equal(slaVerdictsAvailable({ status: "never_synced" }), false);
+assert.equal(slaVerdictsAvailable(null), false);
+assert.equal(slaVerdictsAvailable(undefined), false);
+
 const vite = await createServer({ server: { middlewareMode: true }, appType: "custom" });
 const { buildMockSlaMonitor } = await vite.ssrLoadModule("/src/lib/api.ts") as typeof import("./src/lib/api.ts");
 const { slaGroupPage } = await vite.ssrLoadModule("/src/pages/sla.tsx") as typeof import("./src/pages/sla.tsx");
@@ -138,6 +144,12 @@ assert.equal(mock.by_group["g-missing"].total, 1);
 assert.equal(mock.by_priority.unknown.total, 1);
 assert.equal(mock.trend.find((point) => point.date === "2026-09-08")?.total, 3);
 assert.deepEqual(mock.breach_log.map((row) => row.id), ["2", "5"]);
+assert.equal(slaVerdictsAvailable(mock.freshness), true);
+assert.equal(mock.freshness.status, "up_to_date");
+assert.equal(mock.freshness.checkpoint_source, "dedicated");
+assert.ok(mock.freshness.stale_after, "a synced mock dataset must publish stale_after");
+assert.equal(slaVerdictsAvailable({ ...mock.freshness, status: "out_of_date" }), false);
+assert.equal(slaVerdictsAvailable({ ...mock.freshness, status: "never_synced" }), false);
 await vite.close();
 
 console.log("Mock SLA deadline OK");

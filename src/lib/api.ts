@@ -40,6 +40,7 @@ import type {
   SlaMonitorData,
   SlaPolicy,
   SyncLastRun,
+  SyncFreshness,
   SyncSchedules,
   SyncTriggerResult,
   SystemSettings,
@@ -214,6 +215,7 @@ export function buildMockSlaMonitor(rows: Ticket[], now = new Date()): SlaMonito
   return {
     ...summary,
     summary,
+    freshness: mockFreshness(now),
     by_priority: Object.fromEntries(priority_rows.map((row) => [row.id, row])),
     by_group: Object.fromEntries(sla_rows.map((row) => [row.id, row])),
     priority_rows,
@@ -285,17 +287,22 @@ function mockSearchTickets(rows: Ticket[], query: string): Ticket[] {
 
 let mockSyncOperation: SyncLastRun | null = null;
 
-function mockSyncStatus(now: Date) {
-  const snapshotAt = now.toISOString();
+/** Data freshness of the mock dataset, by the same rule the backend uses. */
+export function mockFreshness(now = new Date()): SyncFreshness {
   const staleAfter = mockSettings.last_success_at
     ? new Date(new Date(mockSettings.last_success_at).getTime() + (mockSettings.schedules.incremental_seconds + 120) * 1000)
     : null;
-  const freshness = {
-    status: !mockSettings.last_success_at ? "never_synced" as const : now <= staleAfter! ? "up_to_date" as const : "out_of_date" as const,
+  return {
+    status: !mockSettings.last_success_at ? "never_synced" : now <= staleAfter! ? "up_to_date" : "out_of_date",
     last_success_at: mockSettings.last_success_at,
     ...(staleAfter ? { stale_after: staleAfter.toISOString() } : {}),
-    checkpoint_source: mockSettings.last_success_at ? "dedicated" as const : null,
+    checkpoint_source: mockSettings.last_success_at ? "dedicated" : null,
   };
+}
+
+function mockSyncStatus(now: Date) {
+  const snapshotAt = now.toISOString();
+  const freshness = mockFreshness(now);
   const worker = { reachable: mockSettings.worker_reachable, workers: [] as string[], snapshot_at: snapshotAt };
   const health = { redis: "ok", database: "ok", zammad: systemSettings.zammad_online ? "ok" : "down", snapshot_at: snapshotAt };
   const requiredKind = freshness.status === "never_synced" ? "full" as const : freshness.status === "out_of_date" ? "incremental" as const : null;

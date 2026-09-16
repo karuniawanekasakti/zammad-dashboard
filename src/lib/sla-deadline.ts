@@ -1,4 +1,17 @@
-import type { SlaStatus, Ticket } from "../types/index.ts";
+import type { SlaStatus, SyncFreshness, Ticket } from "../types/index.ts";
+
+/**
+ * Whether SLA verdicts may be presented as current.
+ *
+ * A live verdict is only as trustworthy as the row it describes. When the
+ * dataset is not Up to Date — Never Synced, Out of Date, or unavailable — the
+ * honest answer is that the verdict is unknown, not that there were no
+ * breaches. Surfaces degrade to "Unavailable" instead of showing a stale
+ * figure as current.
+ */
+export function slaVerdictsAvailable(freshness: Pick<SyncFreshness, "status"> | null | undefined): boolean {
+  return freshness?.status === "up_to_date";
+}
 
 type SlaDeadlineFields = Pick<Ticket,
   | "escalation_at"

@@ -95,6 +95,8 @@ docker compose exec api python check_sync_telemetry.py  # sync summary: watermar
 
 `check_live_sla.py` is the regression check for the two-contradictory-verdicts bug: it reads one ticket through the ticket-detail path and through the SLA Monitor path and asserts an identical verdict and countdown, that the stored verdict columns are gone from both the row model and the API schema, that a closed-late ticket reports its real breach magnitude rather than deadline-minus-now, and that Unmonitored stays distinct from Breached. It also asserts a synced ticket still carries every Zammad SLA fact the live computation reads.
 
+`check_sla_freshness.py` is the regression check for the stale-dataset bug: it asserts the SLA Monitor response carries Data freshness for every role that can view it (admin, team lead, project manager, agent) without widening the administrator-only `/settings` endpoint — whose route dependency still rejects an agent with 403 while accepting an admin — and that freshness classifies Never Synced / Up to Date / Out of Date from the checkpoint, falling back to the sync watermark. The verdict rows still ride along in the payload when the dataset is stale (degrading them to Unavailable is the frontend's job), so the check pins that boundary too.
+
 `check_beat_schedule.py` asserts that a scheduler refresh applies a changed interval while preserving each existing entry's `last_run_at` and `total_run_count`, and that a Full Reconcile whose interval has elapsed is still due after a refresh.
 
 ## Not implemented yet (per PRD)

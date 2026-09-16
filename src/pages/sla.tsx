@@ -1,14 +1,17 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
+import { formatDistanceToNow } from "date-fns";
 import { AlertTriangle, CheckCircle2, Flame } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, Cell, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { api } from "@/lib/api";
+import { slaVerdictsAvailable } from "@/lib/sla-deadline";
 import { useScope } from "@/stores/auth";
 import { PageHeader } from "@/components/page-header";
 import { PageLoader } from "@/components/spinner";
 import { KpiCard } from "@/components/kpi-card";
 import { ChartCard } from "@/components/chart-card";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { PriorityBadge } from "@/components/status-badges";
@@ -29,6 +32,14 @@ export function slaGroupPage(rowCount: number, pageIndex: number) {
 }
 
 const FALLBACK_ZAMMAD_BASE = (import.meta.env.VITE_ZAMMAD_BASE_URL ?? "").replace(/\/$/, "");
+
+const FRESHNESS_LABELS = {
+  never_synced: "Never Synced",
+  up_to_date: "Up to Date",
+  out_of_date: "Out of Date",
+} as const;
+
+const UNAVAILABLE_HELPER = "Unavailable — dataset not up to date";
 
 const STATUS_META: Record<SlaStatus, { label: string; bar: string; text: string; icon: string }> = {
   safe: { label: "On track", bar: "bg-emerald-500", text: "text-emerald-600 dark:text-emerald-400", icon: "bg-emerald-500" },
@@ -67,6 +78,13 @@ export default function SlaPage() {
   const zammadBase = (config.data?.zammad_base_url ?? FALLBACK_ZAMMAD_BASE).replace(/\/$/, "");
   const { index: groupPageIndex, pageCount: groupPageCount, start: groupPageStart } = slaGroupPage(data?.sla_rows.length ?? 0, groupPage);
   const groupRows = data?.sla_rows.slice(groupPageStart, groupPageStart + SLA_GROUP_PAGE_SIZE) ?? [];
+  // A live verdict is only as trustworthy as the row it describes. When the
+  // dataset is not Up to Date the page must not present stale figures as
+  // current — "no breaches" and "no data" are different answers. A response with
+  // no freshness field at all (an older backend) is treated as not up to date.
+  const freshness = data?.freshness ?? null;
+  const verdictsAvailable = slaVerdictsAvailable(freshness);
+  const freshnessLabel = FRESHNESS_LABELS[freshness?.status ?? "never_synced"];
 
   if (monitor.isLoading) return <PageLoader />;
   if (monitor.isError || !data) {
@@ -86,6 +104,20 @@ export default function SlaPage() {
   return (
     <div className="space-y-4">
       <PageHeader title="SLA Monitor" description="SLA compliance dihitung dari semua tiket tersinkron dalam scope/group." />
+
+      {!verdictsAvailable && (
+        <Card className="border-amber-500/50 bg-amber-500/5">
+          <CardContent className="flex flex-wrap items-center gap-x-3 gap-y-2 py-4 text-sm">
+            <Badge variant={freshness?.status === "out_of_date" ? "warning" : "secondary"}>Data freshness: {freshnessLabel}</Badge>
+            <span className="font-medium">SLA verdicts are unavailable — the synchronized dataset is not up to date.</span>
+            <span className="text-muted-foreground">
+              {freshness?.last_success_at
+                ? `Last successful sync ${formatDistanceToNow(new Date(freshness.last_success_at), { addSuffix: true })}. The figures below describe that older dataset, not the present moment.`
+                : "No successful synchronization checkpoint is available, so there is no data to judge."}
+            </span>
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardContent className="flex flex-wrap items-center gap-3 py-4">
@@ -114,10 +146,10 @@ export default function SlaPage() {
       </Card>
 
       <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
-        <KpiCard title="Compliance Rate" value={data.summary.compliance_rate == null ? "-" : formatPercent(data.summary.compliance_rate, 0)} helper={`${formatNumber(data.summary.total_with_sla - data.summary.breached)} of ${formatNumber(data.summary.total_with_sla)} tiket met SLA`} icon={CheckCircle2} iconClassName={complianceIcon(data.summary.compliance_rate)} />
-        <KpiCard title="On Track" value={formatNumber(data.summary.on_track)} helper="within SLA deadline" icon={CheckCircle2} iconClassName="bg-emerald-500/15 text-emerald-600" />
-        <KpiCard title="At-Risk" value={formatNumber(data.summary.at_risk)} helper="Warning ≤ 2 jam · Critical ≤ 30 menit" icon={AlertTriangle} iconClassName="bg-amber-500/15 text-amber-600" />
-        <KpiCard title="Breached" value={formatNumber(data.summary.breached)} helper="SLA deadline passed" icon={Flame} iconClassName="bg-red-500/15 text-red-600" />
+        <KpiCard title="Compliance Rate" value={verdictsAvailable ? (data.summary.compliance_rate == null ? "-" : formatPercent(data.summary.compliance_rate, 0)) : "—"} helper={verdictsAvailable ? `${formatNumber(data.summary.total_with_sla - data.summary.breached)} of ${formatNumber(data.summary.total_with_sla)} tiket met SLA` : UNAVAILABLE_HELPER} icon={CheckCircle2} iconClassName={verdictsAvailable ? complianceIcon(data.summary.compliance_rate) : "bg-muted text-muted-foreground"} />
+        <KpiCard title="On Track" value={verdictsAvailable ? formatNumber(data.summary.on_track) : "—"} helper={verdictsAvailable ? "within SLA deadline" : UNAVAILABLE_HELPER} icon={CheckCircle2} iconClassName={verdictsAvailable ? "bg-emerald-500/15 text-emerald-600" : "bg-muted text-muted-foreground"} />
+        <KpiCard title="At-Risk" value={verdictsAvailable ? formatNumber(data.summary.at_risk) : "—"} helper={verdictsAvailable ? "Warning ≤ 2 jam · Critical ≤ 30 menit" : UNAVAILABLE_HELPER} icon={AlertTriangle} iconClassName={verdictsAvailable ? "bg-amber-500/15 text-amber-600" : "bg-muted text-muted-foreground"} />
+        <KpiCard title="Breached" value={verdictsAvailable ? formatNumber(data.summary.breached) : "—"} helper={verdictsAvailable ? "SLA deadline passed" : UNAVAILABLE_HELPER} icon={Flame} iconClassName={verdictsAvailable ? "bg-red-500/15 text-red-600" : "bg-muted text-muted-foreground"} />
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
@@ -127,7 +159,7 @@ export default function SlaPage() {
             <CardDescription>Compliance rate tiket aktif berdasarkan prioritas.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            {data.priority_rows.map((row) => <ComplianceRow key={row.name} row={row} />)}
+            {data.priority_rows.map((row) => <ComplianceRow key={row.name} row={row} verdictsAvailable={verdictsAvailable} />)}
           </CardContent>
         </Card>
         <Card>
@@ -136,7 +168,7 @@ export default function SlaPage() {
             <CardDescription>Compliance rate tiket aktif berdasarkan group terpilih.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            {groupRows.length ? groupRows.map((row) => <ComplianceRow key={row.id} row={row} />) : <div className="py-8 text-center text-sm text-muted-foreground">Tidak ada tiket dalam scope ini.</div>}
+            {groupRows.length ? groupRows.map((row) => <ComplianceRow key={row.id} row={row} verdictsAvailable={verdictsAvailable} />) : <div className="py-8 text-center text-sm text-muted-foreground">Tidak ada tiket dalam scope ini.</div>}
             {groupPageCount > 1 && (
               <div className="flex items-center justify-between border-t pt-4 text-sm text-muted-foreground">
                 <span>Page {groupPageIndex + 1} of {groupPageCount}</span>
@@ -182,8 +214,8 @@ export default function SlaPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {tableRows.length === 0 && <EmptyRow colSpan={7} text={emptyText(statusTab)} />}
-                {tableRows.map((t) => <RiskRow key={t.id} ticket={t} />)}
+                {tableRows.length === 0 && <EmptyRow colSpan={7} text={verdictsAvailable ? emptyText(statusTab) : "SLA verdicts are unavailable while the dataset is not up to date."} />}
+                {tableRows.map((t) => <RiskRow key={t.id} ticket={t} verdictsAvailable={verdictsAvailable} />)}
               </TableBody>
             </Table>
           </div>
@@ -191,18 +223,22 @@ export default function SlaPage() {
       </Card>
 
       <ChartCard title="Tren Compliance" description="Compliance rate harian tiket closed dalam 7 hari terakhir.">
-        <ResponsiveContainer width="100%" height={260}>
-          <BarChart data={data.trend} margin={{ left: -12, right: 8, top: 8, bottom: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-            <XAxis dataKey="day" tick={{ fontSize: 11 }} />
-            <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} tickFormatter={(v: number) => `${v}%`} />
-            <Tooltip content={<TrendTooltip />} />
-            <ReferenceLine y={90} stroke="hsl(var(--muted-foreground))" strokeDasharray="4 4" label={{ value: "Target 90%", fontSize: 11, fill: "hsl(var(--muted-foreground))" }} />
-            <Bar dataKey="rate" radius={[4, 4, 0, 0]}>
-              {data.trend.map((d) => <Cell key={d.date} fill={d.total === 0 ? CHART_COLORS.empty : d.rate >= 90 ? CHART_COLORS.safe : d.rate >= 75 ? CHART_COLORS.warning : CHART_COLORS.breached} />)}
-            </Bar>
-          </BarChart>
-        </ResponsiveContainer>
+        {verdictsAvailable ? (
+          <ResponsiveContainer width="100%" height={260}>
+            <BarChart data={data.trend} margin={{ left: -12, right: 8, top: 8, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+              <XAxis dataKey="day" tick={{ fontSize: 11 }} />
+              <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} tickFormatter={(v: number) => `${v}%`} />
+              <Tooltip content={<TrendTooltip />} />
+              <ReferenceLine y={90} stroke="hsl(var(--muted-foreground))" strokeDasharray="4 4" label={{ value: "Target 90%", fontSize: 11, fill: "hsl(var(--muted-foreground))" }} />
+              <Bar dataKey="rate" radius={[4, 4, 0, 0]}>
+                {data.trend.map((d) => <Cell key={d.date} fill={d.total === 0 ? CHART_COLORS.empty : d.rate >= 90 ? CHART_COLORS.safe : d.rate >= 75 ? CHART_COLORS.warning : CHART_COLORS.breached} />)}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        ) : (
+          <div className="flex h-[260px] items-center justify-center text-sm text-muted-foreground">Compliance trend unavailable while the dataset is not up to date.</div>
+        )}
       </ChartCard>
 
       <Card>
@@ -210,7 +246,9 @@ export default function SlaPage() {
           <CardTitle className="text-base">Breach heatmap</CardTitle>
           <CardDescription>Breached tickets by escalation/update hour — day × hour (darker = more tickets)</CardDescription>
         </CardHeader>
-        <CardContent><Heatmap grid={data.heatmap.grid} max={data.heatmap.max} /></CardContent>
+        <CardContent>
+          {verdictsAvailable ? <Heatmap grid={data.heatmap.grid} max={data.heatmap.max} /> : <div className="py-8 text-center text-sm text-muted-foreground">Breach heatmap unavailable while the dataset is not up to date.</div>}
+        </CardContent>
       </Card>
 
       <Card>
@@ -219,7 +257,7 @@ export default function SlaPage() {
             <CardTitle className="text-base">Breach Log</CardTitle>
             <CardDescription>Riwayat tiket terminal dengan bukti pelanggaran SLA.</CardDescription>
           </div>
-          {data.breach_log.length > 20 && <Button variant="outline" size="sm" onClick={() => setShowAllBreaches((v) => !v)}>{showAllBreaches ? "Tampilkan 20" : "Lihat semua"}</Button>}
+          {verdictsAvailable && data.breach_log.length > 20 && <Button variant="outline" size="sm" onClick={() => setShowAllBreaches((v) => !v)}>{showAllBreaches ? "Tampilkan 20" : "Lihat semua"}</Button>}
         </CardHeader>
         <CardContent>
           <div className="overflow-x-auto rounded-md border">
@@ -236,8 +274,9 @@ export default function SlaPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {data.breach_log.length === 0 && <EmptyRow colSpan={7} text="Belum ada breach log." />}
-                {data.breach_log.slice(0, showAllBreaches ? data.breach_log.length : 20).map((t) => <BreachLogRow key={t.id} ticket={t} zammadBase={zammadBase} />)}
+                {!verdictsAvailable && <EmptyRow colSpan={7} text="Breach log unavailable — the dataset is not up to date, so absence of breaches cannot be claimed." />}
+                {verdictsAvailable && data.breach_log.length === 0 && <EmptyRow colSpan={7} text="Belum ada breach log." />}
+                {verdictsAvailable && data.breach_log.slice(0, showAllBreaches ? data.breach_log.length : 20).map((t) => <BreachLogRow key={t.id} ticket={t} zammadBase={zammadBase} />)}
               </TableBody>
             </Table>
           </div>
@@ -247,13 +286,15 @@ export default function SlaPage() {
   );
 }
 
-function ComplianceRow({ row }: { row: SlaMonitorRow }) {
-  const rate = row.compliance_rate;
+function ComplianceRow({ row, verdictsAvailable }: { row: SlaMonitorRow; verdictsAvailable: boolean }) {
+  const rate = verdictsAvailable ? row.compliance_rate : null;
   return (
     <div className="space-y-1.5">
       <div className="flex items-center justify-between gap-3 text-sm">
         <span className="font-medium capitalize">{row.name}</span>
-        <span className="text-muted-foreground">{rate == null ? "-" : formatPercent(rate, 0)} · {formatNumber(row.total)} tiket</span>
+        <span className="text-muted-foreground">
+          {!verdictsAvailable ? "Unavailable" : rate == null ? "-" : formatPercent(rate, 0)} · {formatNumber(row.total)} tiket
+        </span>
       </div>
       <div className="h-2 overflow-hidden rounded-full bg-secondary">
         <div className={cn("h-full rounded-full", rate == null ? "bg-muted-foreground" : rate >= 90 ? "bg-emerald-500" : rate >= 80 ? "bg-amber-500" : "bg-red-600")} style={{ width: `${rate == null ? 0 : Math.min(100, rate)}%` }} />
@@ -262,7 +303,7 @@ function ComplianceRow({ row }: { row: SlaMonitorRow }) {
   );
 }
 
-function RiskRow({ ticket }: { ticket: SlaMonitorTicket }) {
+function RiskRow({ ticket, verdictsAvailable }: { ticket: SlaMonitorTicket; verdictsAvailable: boolean }) {
   const meta = STATUS_META[ticket.live_sla_status];
   return (
     <TableRow>
@@ -273,12 +314,18 @@ function RiskRow({ ticket }: { ticket: SlaMonitorTicket }) {
       <TableCell className="text-sm">{ticket.owner_name ?? "-"}</TableCell>
       <TableCell className="text-sm">{formatDate(ticket.actionable_deadline)}</TableCell>
       <TableCell className="min-w-[170px]">
-        <div className={cn("mb-1 flex items-center gap-2 text-sm font-medium", meta.text)}>
-          <span className={cn("size-2 rounded-full", meta.icon)} />
-          <span>{meta.label}</span>
-          <span className="text-muted-foreground">· {formatSlaDelta(ticket.sla_remaining_ms)}</span>
-        </div>
-        <div className="h-1.5 overflow-hidden rounded-full bg-secondary"><div className={cn("h-full rounded-full", meta.bar)} style={{ width: `${ticket.sla_progress}%` }} /></div>
+        {verdictsAvailable ? (
+          <>
+            <div className={cn("mb-1 flex items-center gap-2 text-sm font-medium", meta.text)}>
+              <span className={cn("size-2 rounded-full", meta.icon)} />
+              <span>{meta.label}</span>
+              <span className="text-muted-foreground">· {formatSlaDelta(ticket.sla_remaining_ms)}</span>
+            </div>
+            <div className="h-1.5 overflow-hidden rounded-full bg-secondary"><div className={cn("h-full rounded-full", meta.bar)} style={{ width: `${ticket.sla_progress}%` }} /></div>
+          </>
+        ) : (
+          <span className="text-sm text-muted-foreground">Unavailable</span>
+        )}
       </TableCell>
     </TableRow>
   );

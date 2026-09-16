@@ -117,6 +117,12 @@ export interface SlaMonitorData {
   breached: number;
   no_sla: number;
   avg_resolution_minutes: number | null;
+  /**
+   * Data freshness of the synchronized dataset these figures came from. A
+   * stale dataset degrades every verdict here to unavailable: "no breaches"
+   * must never be reported when what the page actually has is no data.
+   */
+  freshness: SyncFreshness;
   summary: {
     total: number;
     total_active: number;

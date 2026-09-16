@@ -9,8 +9,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.cache import cache_get, cache_set
 from app.db_models import TicketRow
 from app.deps import get_current_user, get_db
+from app.freshness import dataset_freshness
 from app.models import ApiResponse, TicketArticleOut, TicketHistoryOut, TicketOut
-from app.repositories import get_articles_for_ticket, get_state_history, list_groups as list_group_rows, list_tickets as list_ticket_rows, upsert_articles, upsert_ticket
+from app.repositories import get_articles_for_ticket, get_setting, get_state_history, list_groups as list_group_rows, list_tickets as list_ticket_rows, upsert_articles, upsert_ticket
 from app.ticket_table import apply_advanced_filters, apply_table_sorts
 from app.zammad_client import zammad
 
@@ -605,7 +606,13 @@ async def sla_monitor(
     visible_ids = {t.group_id for t in tickets}
     group_names = {g.id: g.name or "Unknown" for g in await list_group_rows(db)}
     groups = sorted((group_id or "unknown", group_names.get(group_id, "Unknown")) for group_id in visible_ids)
-    return ApiResponse(data=_build_sla_monitor(tickets, groups=groups))
+    # Data freshness rides along with the payload the page already fetches: the
+    # SLA surfaces must degrade their verdicts when the dataset is stale, and
+    # every role that may view them needs that fact without the admin-only
+    # settings endpoint.
+    data = _build_sla_monitor(tickets, groups=groups)
+    data["freshness"] = await dataset_freshness(db, datetime.now(timezone.utc), get_setting)
+    return ApiResponse(data=data)
 
 
 @router.get("/overview", response_model=ApiResponse)

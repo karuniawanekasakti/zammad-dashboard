@@ -12,10 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings as app_settings
 from app.deps import get_db, get_redis, require_roles
 
-# The freshness vocabulary lives in app.freshness so the Settings surfaces and the
-# SLA Monitor can never disagree about whether the dataset is stale. These names
-# stay importable from here because app.tasks and the settings self-checks use them.
-from app.freshness import DEFAULT_SCHEDULES, FRESHNESS_GRACE_SECONDS, LAST_SUCCESS_KEY, SCHEDULES_KEY, SYNC_WATERMARK_KEY, freshness as _freshness, parse_datetime as _parse_datetime, read_checkpoint
+from app.freshness import DEFAULT_SCHEDULES, SCHEDULES_KEY, freshness as _freshness, parse_datetime as _parse_datetime, read_checkpoint
 from app.models import ApiResponse, Role
 from app.repositories import get_setting, set_setting
 from app.sync_operation import acquire, current as current_operation, new_operation, project

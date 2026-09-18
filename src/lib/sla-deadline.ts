@@ -57,7 +57,22 @@ export function slaStatus(ticket: SlaStatusFields, now: Date): SlaStatus {
   return "on_track";
 }
 
-export function slaRemainingMs(ticket: SlaDeadlineFields, now: Date): number | null {
+export function slaRemainingMs(ticket: SlaStatusFields, now: Date): number | null {
+  if (ticket.state === "closed" || ticket.state === "merged") {
+    // A resolved ticket has no countdown; the meaningful figure is how far it
+    // missed, mirroring the backend's `_sla_remaining_ms`. deadline-minus-now
+    // would inflate a 6-minute miss into however long ago the deadline passed.
+    const missed = [ticket.first_response_diff_in_min, ticket.update_diff_in_min, ticket.close_diff_in_min].filter(
+      (value): value is number => value != null && value < 0
+    );
+    if (missed.length) return Math.min(...missed) * 60 * 1000;
+    const deadline = slaDeadline(ticket);
+    const closedAt = ticket.close_at ?? ticket.closed_at;
+    if (deadline && closedAt && new Date(closedAt).getTime() > deadline.getTime()) {
+      return -(new Date(closedAt).getTime() - deadline.getTime());
+    }
+    return null;
+  }
   const deadline = slaDeadline(ticket);
   return deadline ? deadline.getTime() - now.getTime() : null;
 }

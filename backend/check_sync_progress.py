@@ -7,6 +7,7 @@ import threading
 from datetime import datetime, timezone
 
 from app import sync_operation, tasks
+from app.freshness import LAST_SUCCESS_KEY
 from app.routers import settings
 
 
@@ -56,7 +57,7 @@ async def main() -> None:
         raise AssertionError("incremental sync exposed an inapplicable phase")
 
     values = {
-        settings.LAST_SUCCESS_KEY: {"value": now.isoformat()},
+        LAST_SUCCESS_KEY: {"value": now.isoformat()},
         settings.LAST_RUN_KEY: operation,
     }
 

@@ -198,7 +198,9 @@ export function buildMockSlaMonitor(rows: Ticket[], now = new Date()): SlaMonito
   });
   const rank: Record<LiveSlaStatus, number> = { breached: 0, critical: 1, warning: 2, on_track: 3, safe: 3, no_sla: 4, closed_on_time: 5 };
   enriched.sort((a, b) => rank[a.live_sla_status] - rank[b.live_sla_status] || (a.sla_remaining_ms ?? Infinity) - (b.sla_remaining_ms ?? Infinity));
-  const breachLog = closed.filter((t) => slaStatus(t, now) === "breached").sort((a, b) => new Date(b.close_at ?? b.closed_at ?? 0).getTime() - new Date(a.close_at ?? a.closed_at ?? 0).getTime());
+  const breachLog = closedEnriched
+    .filter((t) => t.live_sla_status === "breached")
+    .sort((a, b) => new Date(b.close_at ?? b.closed_at ?? 0).getTime() - new Date(a.close_at ?? a.closed_at ?? 0).getTime());
   const avgCloseRows = closed.filter((t) => t.close_at || t.closed_at).map((t) => t.close_in_min).filter((n): n is number => n != null);
   const summary = {
     ...slaCounts(enriched),

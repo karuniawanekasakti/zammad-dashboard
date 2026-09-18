@@ -20,6 +20,8 @@ import type {
   User,
 } from "@/types";
 
+import { slaRemainingMs, slaStatus } from "@/lib/sla-deadline";
+
 // -- Deterministic PRNG for stable mock data across reloads ------------------
 function mulberry32(seed: number) {
   let a = seed;
@@ -292,7 +294,7 @@ function pickSla(state: TicketState, createdHoursAgo: number) {
   }
 }
 
-export const tickets: Ticket[] = [];
+const rawTickets: Ticket[] = [];
 const TICKET_COUNT = 240;
 for (let i = 0; i < TICKET_COUNT; i++) {
   const state = rand() < 0.35 ? "closed" : pick(STATES.filter((s) => s !== "closed"));
@@ -309,7 +311,7 @@ for (let i = 0; i < TICKET_COUNT; i++) {
     state === "closed" ? (createdHoursAgo - (closedHoursAgo ?? 0)) * 3600 : null;
   const first_reply_time_secs = rand() > 0.1 ? between(120, 4 * 3600) : null;
 
-  tickets.push({
+  rawTickets.push({
     id: uuid("tkt", i + 1),
     zammad_id: 10000 + i,
     number: (10000 + i).toString(),
@@ -353,6 +355,14 @@ for (let i = 0; i < TICKET_COUNT; i++) {
     closed_at: closedHoursAgo ? new Date(Date.now() - closedHoursAgo * 3600 * 1000).toISOString() : null,
   });
 }
+// The read seam applies the same live derivation the backend's ticket_payload
+// does, so a fixture's stored verdict can never contradict the SLA Monitor.
+const readNow = new Date();
+export const tickets: Ticket[] = rawTickets.map((ticket) => ({
+  ...ticket,
+  live_sla_status: slaStatus(ticket, readNow),
+  sla_remaining_ms: slaRemainingMs(ticket, readNow),
+}));
 
 // -- Ticket articles ---------------------------------------------------------
 const ARTICLE_BODIES = [

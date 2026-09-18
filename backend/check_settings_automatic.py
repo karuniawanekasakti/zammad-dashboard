@@ -6,6 +6,7 @@ import asyncio
 import json
 from datetime import datetime, timedelta, timezone
 
+from app.freshness import DEFAULT_SCHEDULES, FRESHNESS_GRACE_SECONDS, LAST_SUCCESS_KEY, SCHEDULES_KEY
 from app.routers import settings
 
 
@@ -83,19 +84,19 @@ async def main() -> None:
         "next_eligible_at": None,
     }
 
-    values[settings.LAST_SUCCESS_KEY] = {
-        "value": (now - timedelta(seconds=settings.DEFAULT_SCHEDULES["incremental_seconds"] + settings.FRESHNESS_GRACE_SECONDS + 1)).isoformat()
+    values[LAST_SUCCESS_KEY] = {
+        "value": (now - timedelta(seconds=DEFAULT_SCHEDULES["incremental_seconds"] + FRESHNESS_GRACE_SECONDS + 1)).isoformat()
     }
     status = await read_status()
     assert status["automatic"]["eligible"] is True
     assert status["automatic"]["required_kind"] == "incremental"
 
-    values[settings.LAST_SUCCESS_KEY] = {"value": now.isoformat()}
+    values[LAST_SUCCESS_KEY] = {"value": now.isoformat()}
     status = await read_status()
     assert status["automatic"]["eligible"] is False
     assert status["automatic"]["required_kind"] is None
 
-    values[settings.LAST_SUCCESS_KEY] = {
+    values[LAST_SUCCESS_KEY] = {
         "value": (now - timedelta(hours=1)).isoformat()
     }
     probes["health"]["zammad"] = "down"
@@ -109,7 +110,7 @@ async def main() -> None:
     recovered = await read_status()
     assert recovered["automatic"]["eligible"] is True, "one request becomes eligible when dependencies recover"
 
-    values[settings.SCHEDULES_KEY] = {"incremental_seconds": 60, "full_reconcile_seconds": 21600}
+    values[SCHEDULES_KEY] = {"incremental_seconds": 60, "full_reconcile_seconds": 21600}
     failed_at = now - timedelta(seconds=30)
     values[settings.LAST_RUN_KEY] = {
         "operation_id": "failed-auto",

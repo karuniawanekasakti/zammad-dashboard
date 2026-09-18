@@ -557,7 +557,7 @@ def reload_schedules():
     reads from Redis via RedisScheduler.
     """
     from app.repositories import get_setting as _get_setting
-    from app.routers.settings import DEFAULT_SCHEDULES, SCHEDULES_KEY
+    from app.freshness import DEFAULT_SCHEDULES, SCHEDULES_KEY
     from app.celery_app import publish_schedules_to_redis
 
     async def _do(session_factory):

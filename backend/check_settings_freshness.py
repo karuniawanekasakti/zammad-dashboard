@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from time import perf_counter
 
 from app import tasks
+from app.freshness import DEFAULT_SCHEDULES, FRESHNESS_GRACE_SECONDS, LAST_SUCCESS_KEY, SCHEDULES_KEY, SYNC_WATERMARK_KEY
 from app.routers import settings
 
 
@@ -32,12 +33,12 @@ async def main() -> None:
     assert result["freshness"]["status"] == "never_synced"
     assert result["latest_attempt"] is None
 
-    checkpoint = now - timedelta(seconds=settings.DEFAULT_SCHEDULES["incremental_seconds"] + settings.FRESHNESS_GRACE_SECONDS)
-    values[settings.LAST_SUCCESS_KEY] = {"value": checkpoint.isoformat()}
+    checkpoint = now - timedelta(seconds=DEFAULT_SCHEDULES["incremental_seconds"] + FRESHNESS_GRACE_SECONDS)
+    values[LAST_SUCCESS_KEY] = {"value": checkpoint.isoformat()}
     result = await read_status()
     assert result["freshness"]["status"] == "up_to_date", "the exact cadence-plus-grace boundary is still fresh"
 
-    values[settings.LAST_SUCCESS_KEY] = {"value": (checkpoint - timedelta(microseconds=1)).isoformat()}
+    values[LAST_SUCCESS_KEY] = {"value": (checkpoint - timedelta(microseconds=1)).isoformat()}
     result = await read_status()
     assert result["freshness"]["status"] == "out_of_date"
 
@@ -50,14 +51,14 @@ async def main() -> None:
     result = await read_status()
     assert result["latest_attempt"]["status"] == "succeeded"
 
-    values.pop(settings.LAST_SUCCESS_KEY)
-    values[settings.SYNC_WATERMARK_KEY] = {"value": now.isoformat()}
+    values.pop(LAST_SUCCESS_KEY)
+    values[SYNC_WATERMARK_KEY] = {"value": now.isoformat()}
     result = await read_status()
     assert result["freshness"]["status"] == "up_to_date"
     assert result["freshness"]["checkpoint_source"] == "watermark"
 
-    values[settings.SCHEDULES_KEY] = {"incremental_seconds": 30, "full_reconcile_seconds": 21600}
-    values[settings.SYNC_WATERMARK_KEY] = {"value": (now - timedelta(seconds=151)).isoformat()}
+    values[SCHEDULES_KEY] = {"incremental_seconds": 30, "full_reconcile_seconds": 21600}
+    values[SYNC_WATERMARK_KEY] = {"value": (now - timedelta(seconds=151)).isoformat()}
     result = await read_status()
     assert result["freshness"]["status"] == "out_of_date", "status must use the saved cadence"
 

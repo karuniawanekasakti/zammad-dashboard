@@ -144,6 +144,7 @@ assert.equal(mock.by_group["g-missing"].total, 1);
 assert.equal(mock.by_priority.unknown.total, 1);
 assert.equal(mock.trend.find((point) => point.date === "2026-09-08")?.total, 3);
 assert.deepEqual(mock.breach_log.map((row) => row.id), ["2", "5"]);
+assert.equal(mock.breach_log.find((row) => row.id === "5")?.sla_remaining_ms, -60_000);
 assert.equal(slaVerdictsAvailable(mock.freshness), true);
 assert.equal(mock.freshness.status, "up_to_date");
 assert.equal(mock.freshness.checkpoint_source, "dedicated");

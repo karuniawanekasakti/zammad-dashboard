@@ -355,14 +355,15 @@ for (let i = 0; i < TICKET_COUNT; i++) {
     closed_at: closedHoursAgo ? new Date(Date.now() - closedHoursAgo * 3600 * 1000).toISOString() : null,
   });
 }
-// The read seam applies the same live derivation the backend's ticket_payload
-// does, so a fixture's stored verdict can never contradict the SLA Monitor.
-const readNow = new Date();
-export const tickets: Ticket[] = rawTickets.map((ticket) => ({
-  ...ticket,
-  live_sla_status: slaStatus(ticket, readNow),
-  sla_remaining_ms: slaRemainingMs(ticket, readNow),
-}));
+export const tickets: Ticket[] = rawTickets;
+
+export function liveTickets(now = new Date()): Ticket[] {
+  return tickets.map((ticket) => ({
+    ...ticket,
+    live_sla_status: slaStatus(ticket, now),
+    sla_remaining_ms: slaRemainingMs(ticket, now),
+  }));
+}
 
 // -- Ticket articles ---------------------------------------------------------
 const ARTICLE_BODIES = [
@@ -458,11 +459,12 @@ export function historyForTicket(ticketId: string): TicketHistory[] {
 
 // -- KPI summary -------------------------------------------------------------
 export function kpiSummaryForScope(scope: { role: string; group_ids?: string[]; user_id?: string }): KpiSummary {
-  let scoped = tickets;
+  const current = liveTickets();
+  let scoped = current;
   if (scope.role === "agent" && scope.user_id) {
-    scoped = tickets.filter((t) => t.owner_id === scope.user_id);
+    scoped = current.filter((t) => t.owner_id === scope.user_id);
   } else if ((scope.role === "team_lead" || scope.role === "project_manager") && scope.group_ids?.length) {
-    scoped = tickets.filter((t) => scope.group_ids!.includes(t.group_id));
+    scoped = current.filter((t) => scope.group_ids!.includes(t.group_id));
   }
 
   const open = scoped.filter((t) => t.state !== "closed");
@@ -513,8 +515,9 @@ export function trendFor(days: number, base: number, variance: number): TrendPoi
 
 // -- Agent stats -------------------------------------------------------------
 export function agentStats(): AgentStat[] {
+  const current = liveTickets();
   return agents.map((agent) => {
-    const own = tickets.filter((t) => t.owner_id === agent.id);
+    const own = current.filter((t) => t.owner_id === agent.id);
     const open = own.filter((t) => t.state !== "closed");
     const atRisk = own.filter((t) => t.live_sla_status === "warning" || t.live_sla_status === "critical").length;
     const breached = own.filter((t) => t.live_sla_status === "breached" || t.first_response_breached).length;
@@ -544,8 +547,9 @@ export function agentStats(): AgentStat[] {
 
 // -- Group stats -------------------------------------------------------------
 export function groupStats(): GroupStat[] {
+  const current = liveTickets();
   return groups.map((group) => {
-    const scoped = tickets.filter((t) => t.group_id === group.id);
+    const scoped = current.filter((t) => t.group_id === group.id);
     const open = scoped.filter((t) => t.state !== "closed");
     const breached = scoped.filter((t) => t.first_response_breached || t.close_breached);
     const replyTimes = scoped.map((t) => t.first_reply_time_secs).filter((n): n is number => n != null);

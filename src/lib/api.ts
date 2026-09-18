@@ -11,12 +11,12 @@ import {
   groups,
   kpiSummaryForScope,
   mockSettings,
+  liveTickets,
   notifications,
   reportExports,
   addReportExport,
   slaPolicies,
   systemSettings,
-  tickets,
   trendFor,
   upsertAlertRule,
   users,
@@ -353,7 +353,7 @@ const mockApi = {
     scope: Scope,
     filters: TicketFilters = {}
   ): Promise<{ rows: Ticket[]; total: number }> {
-    let rows = applyScope(tickets, scope);
+    let rows = applyScope(liveTickets(), scope);
     if (filters.state && filters.state !== "all") rows = rows.filter((t) => t.state === filters.state);
     if (filters.priority && filters.priority !== "all")
       rows = rows.filter((t) => t.priority === filters.priority);
@@ -377,7 +377,7 @@ const mockApi = {
   },
 
   async getTicket(id: string): Promise<{ ticket: Ticket; articles: TicketArticle[] } | null> {
-    const t = tickets.find((x) => x.id === id);
+    const t = liveTickets().find((x) => x.id === id);
     if (!t) return delay(null);
     return delay({ ticket: t, articles: articlesForTicket(id) });
   },
@@ -387,7 +387,7 @@ const mockApi = {
   },
 
   async listAtRisk(scope: Scope): Promise<Ticket[]> {
-    const rows = applyScope(tickets, scope).filter(
+    const rows = applyScope(liveTickets(), scope).filter(
       (t) => t.live_sla_status === "warning" || t.live_sla_status === "critical" || t.live_sla_status === "breached"
     );
     return delay(
@@ -399,14 +399,14 @@ const mockApi = {
   },
 
   async listSlaMonitor(scope: Scope, groupId?: string, priority?: TicketPriority | "all"): Promise<SlaMonitorData> {
-    let rows = applyScope(tickets, scope);
+    let rows = applyScope(liveTickets(), scope);
     if (groupId && groupId !== "all") rows = rows.filter((t) => t.group_id === groupId);
     if (priority && priority !== "all") rows = rows.filter((t) => t.priority === priority);
     return delay(buildMockSlaMonitor(rows));
   },
 
   async searchTickets(query: string, perPage = 100): Promise<Ticket[]> {
-    return delay(mockSearchTickets([...tickets], query).slice(0, perPage));
+    return delay(mockSearchTickets(liveTickets(), query).slice(0, perPage));
   },
 
   async listSlaPolicies(): Promise<SlaPolicy[]> {
@@ -441,7 +441,7 @@ const mockApi = {
     params: { period: OverviewPeriod; year: number; month?: number; week?: string; day?: string; group_id?: string | "all"; owner_id?: string | "all"; tab?: OverviewTab; page?: number; page_size?: number }
   ): Promise<OverviewData> {
     const buckets = overviewBuckets(params.period, params.year, params.month, params.week, params.day);
-    let scopedTickets = applyScope(tickets, scope);
+    let scopedTickets = applyScope(liveTickets(), scope);
     if (params.group_id && params.group_id !== "all") scopedTickets = scopedTickets.filter((t) => t.group_id === params.group_id);
     if (params.owner_id && params.owner_id !== "all") scopedTickets = scopedTickets.filter((t) => t.owner_id === params.owner_id);
 

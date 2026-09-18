@@ -98,10 +98,22 @@ assert.equal(slaVerdictsAvailable(undefined), false);
 
 const vite = await createServer({ server: { middlewareMode: true }, appType: "custom" });
 const { buildMockSlaMonitor } = await vite.ssrLoadModule("/src/lib/api.ts") as typeof import("./src/lib/api.ts");
+const { liveTickets, tickets } = await vite.ssrLoadModule("/src/lib/mock-data.ts") as typeof import("./src/lib/mock-data.ts");
 const { slaGroupPage } = await vite.ssrLoadModule("/src/pages/sla.tsx") as typeof import("./src/pages/sla.tsx");
 assert.deepEqual(slaGroupPage(12, 0), { index: 0, pageCount: 3, start: 0 });
 assert.deepEqual(slaGroupPage(12, 2), { index: 2, pageCount: 3, start: 10 });
 assert.deepEqual(slaGroupPage(3, 9), { index: 0, pageCount: 1, start: 0 });
+const changingTicket = tickets.find((row) => row.state !== "closed" && row.state !== "merged");
+assert.ok(changingTicket);
+changingTicket.first_response_breached = false;
+changingTicket.close_breached = false;
+changingTicket.first_response_diff_in_min = null;
+changingTicket.update_diff_in_min = null;
+changingTicket.close_diff_in_min = null;
+changingTicket.escalation_at = "2026-09-08T10:00:00.000Z";
+assert.equal(liveTickets(new Date("2026-09-08T08:30:00.000Z")).find((row) => row.id === changingTicket.id)?.live_sla_status, "warning");
+assert.equal(liveTickets(new Date("2026-09-08T10:01:00.000Z")).find((row) => row.id === changingTicket.id)?.live_sla_status, "breached");
+assert.equal(liveTickets(new Date("2026-09-08T10:01:00.000Z")).find((row) => row.id === changingTicket.id)?.sla_remaining_ms, -60_000);
 const mockTicket = (id: string, overrides: Partial<Ticket>): Ticket => ({
   ...ticket(null),
   id,

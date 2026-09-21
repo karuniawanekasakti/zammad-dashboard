@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
-import { ArrowDownUp, ArrowLeft, AlertTriangle, Bell, ChevronDown, ChevronUp, Clock, FileText, Lock, Mail, MessageSquare, Phone, RefreshCw, RotateCcw, Tag, User } from "lucide-react";
+import { ArrowDownUp, ArrowLeft, AlertTriangle, Bell, CheckCircle2, ChevronDown, ChevronUp, Clock, FileText, Lock, Mail, MessageSquare, Pause, Phone, Play, RefreshCw, RotateCcw, Tag, TriangleAlert, User } from "lucide-react";
 import { format, formatDistanceToNow } from "date-fns";
 import { api } from "@/lib/api";
 import { PageLoader } from "@/components/spinner";
@@ -9,6 +9,7 @@ import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Timeline,
   TimelineContent,
@@ -22,6 +23,7 @@ import {
 import { PriorityBadge, StateBadge } from "@/components/status-badges";
 import { SlaBadge } from "@/components/sla-badge";
 import { cn, formatSeconds } from "@/lib/utils";
+import { mergeSlaTimeline, type SlaEventType, type SlaTimelineEntry } from "@/lib/sla-timeline";
 import type { Ticket, TicketArticle, TicketHistory } from "@/types";
 
 const ICONS = {
@@ -66,7 +68,6 @@ export default function TicketDetailPage() {
   if (!data) return <div className="text-sm text-muted-foreground">Ticket not found.</div>;
 
   const { ticket, articles } = data;
-  const timelineHistory = history.length ? history : fallbackHistory(ticket, articles);
 
   return (
     <div className="space-y-6">
@@ -134,18 +135,12 @@ export default function TicketDetailPage() {
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">
-                <Clock className="size-4" /> History
+                <Clock className="size-4" /> SLA activity
               </CardTitle>
-              <CardDescription>{historyError ? "Endpoint history gagal, menampilkan aktivitas lokal" : "Timeline aktivitas ticket dari Zammad"}</CardDescription>
+              <CardDescription>SLA events and ticket articles in chronological order</CardDescription>
             </CardHeader>
             <CardContent>
-              <TicketHistoryTimeline
-                ticket={ticket}
-                articleCount={articles.length}
-                history={timelineHistory}
-                loading={historyLoading && !timelineHistory.length}
-                error={false}
-              />
+              <SlaActivityTimeline history={history} articles={articles} loading={historyLoading} error={historyError} />
             </CardContent>
           </Card>
         </div>
@@ -289,37 +284,64 @@ function readableHref(href: string | null) {
   }
 }
 
-function fallbackHistory(ticket: Ticket, articles: TicketArticle[]): TicketHistory[] {
-  return [
-    {
-      id: `${ticket.id}-created`,
-      type: "created",
-      title: "Ticket created",
-      created_by: ticket.customer_name,
-      created_at: ticket.zammad_created_at,
-      object: "Ticket",
-      to: ticket.state,
-    },
-    ...articles.map((article) => ({
-      id: `${article.id}-history`,
-      type: "created",
-      object: "Article",
-      title: article.internal ? "Internal note added" : "Article added",
-      body: article.body,
-      created_by: article.author_name,
-      created_at: article.created_at,
-    })),
-    {
-      id: `${ticket.id}-updated`,
-      type: "state",
-      attribute: "state",
-      title: "Ticket updated",
-      created_by: ticket.owner_name ?? "System",
-      created_at: ticket.zammad_updated_at,
-      from: "new",
-      to: ticket.state,
-    },
-  ];
+const SLA_EVENT_META: Record<SlaEventType, { icon: typeof Clock; className: string }> = {
+  sla_start: { icon: Play, className: "text-blue-600" },
+  sla_pause: { icon: Pause, className: "text-amber-600" },
+  sla_resume: { icon: Play, className: "text-blue-600" },
+  sla_warning: { icon: TriangleAlert, className: "text-amber-600" },
+  sla_critical: { icon: AlertTriangle, className: "text-orange-600" },
+  sla_breach: { icon: AlertTriangle, className: "text-destructive" },
+  sla_milestone_complete: { icon: CheckCircle2, className: "text-emerald-600" },
+};
+
+export function SlaActivityTimeline({ history, articles, loading, error }: { history: TicketHistory[]; articles: TicketArticle[]; loading: boolean; error: boolean }) {
+  const entries = useMemo(() => mergeSlaTimeline(history, articles), [history, articles]);
+
+  if (loading) return <TimelineSkeleton />;
+  if (error) return <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">SLA history could not be loaded.</div>;
+  if (!entries.length) return <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">No activities attached to this ticket.</div>;
+
+  const renderEntries = (rows: SlaTimelineEntry[]) => rows.length ? (
+    <Timeline defaultValue={rows.length} className="mt-4 gap-5">
+      {rows.map((entry, index) => <SlaActivityItem key={entry.id} entry={entry} step={index + 1} />)}
+    </Timeline>
+  ) : <div className="mt-4 rounded-lg border border-dashed p-6 text-sm text-muted-foreground">No SLA events recorded.</div>;
+
+  return (
+    <Tabs defaultValue="sla">
+      <TabsList>
+        <TabsTrigger value="sla">SLA Events Only</TabsTrigger>
+        <TabsTrigger value="full">Full History</TabsTrigger>
+      </TabsList>
+      <TabsContent value="sla">{renderEntries(entries.filter((entry) => entry.type !== "article"))}</TabsContent>
+      <TabsContent value="full">{renderEntries(entries)}</TabsContent>
+    </Tabs>
+  );
+}
+
+function SlaActivityItem({ entry, step }: { entry: SlaTimelineEntry; step: number }) {
+  const article = entry.type === "article";
+  const meta = article ? { icon: ICONS[entry.articleType ?? "note"], className: "text-emerald-600" } : SLA_EVENT_META[entry.type];
+  const Icon = meta.icon;
+  return (
+    <TimelineItem step={step} className="pb-5 last:pb-0">
+      <TimelineSeparator className="bg-border" />
+      <TimelineIndicator className="flex size-7 items-center justify-center border bg-background shadow-sm">
+        <Icon className={cn("size-3.5", meta.className)} />
+      </TimelineIndicator>
+      <TimelineHeader className="rounded-lg border bg-background p-3">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <TimelineTitle>{entry.label}</TimelineTitle>
+            {article && <><span className="text-sm font-medium">{entry.authorName}</span><Badge variant={entry.authorRole === "customer" ? "secondary" : "default"} className="capitalize">{entry.authorRole}</Badge></>}
+            {article && entry.internal && <Badge variant="warning">Internal</Badge>}
+          </div>
+          <time dateTime={entry.timestamp} className="text-xs text-muted-foreground">{format(new Date(entry.timestamp), "PPp")}</time>
+        </div>
+        {entry.body && <TimelineContent className="mt-3"><ArticleBody body={entry.body} /></TimelineContent>}
+      </TimelineHeader>
+    </TimelineItem>
+  );
 }
 
 type NormalizedHistory = ReturnType<typeof normalizeHistory>;

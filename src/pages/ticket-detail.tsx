@@ -21,6 +21,8 @@ import {
 } from "@/components/reui/timeline";
 import { PriorityBadge, StateBadge } from "@/components/status-badges";
 import { SlaBadge } from "@/components/sla-badge";
+import { MilestoneProgressBar } from "@/components/milestone-progress-bar";
+import { slaDeadline, slaProgress, slaStatus } from "@/lib/sla-deadline";
 import { cn, formatSeconds } from "@/lib/utils";
 import type { Ticket, TicketArticle, TicketHistory } from "@/types";
 
@@ -67,6 +69,37 @@ export default function TicketDetailPage() {
 
   const { ticket, articles } = data;
   const timelineHistory = history.length ? history : fallbackHistory(ticket, articles);
+  const slaHistory: TicketHistory[] = [
+    ...history,
+    ...articles
+      .filter((article) => !article.internal && article.author_role !== "system")
+      .map((article) => ({
+        id: `${article.id}-sla`,
+        type: article.author_role === "customer" ? "customer_reply" : "agent_reply",
+        created_at: article.created_at,
+      })),
+  ];
+  const now = new Date();
+  const firstResponseSla = {
+    ...ticket,
+    escalation_at: ticket.first_response_escalation_at,
+    update_escalation_at: null,
+    close_escalation_at: null,
+    update_diff_in_min: null,
+    close_diff_in_min: null,
+    close_breached: false,
+  };
+  const resolutionSla = {
+    ...ticket,
+    escalation_at: ticket.close_escalation_at,
+    first_response_escalation_at: null,
+    update_escalation_at: null,
+    first_response_diff_in_min: null,
+    update_diff_in_min: null,
+    first_response_breached: false,
+  };
+  const firstResponseCurrent = ticket.first_response_at ? new Date(ticket.first_response_at) : now;
+  const resolutionCurrent = ticket.close_at || ticket.closed_at ? new Date(ticket.close_at ?? ticket.closed_at!) : now;
 
   return (
     <div className="space-y-6">
@@ -169,26 +202,31 @@ export default function TicketDetailPage() {
               />
             </CardContent>
           </Card>
-
           <Card>
             <CardHeader className="pb-2"><CardTitle className="text-base">SLA</CardTitle></CardHeader>
-            <CardContent className="space-y-3 text-sm">
-              <Info
-                label="First reply"
-                value={
-                  ticket.first_reply_time_secs == null
-                    ? "Pending"
-                    : formatSeconds(ticket.first_reply_time_secs)
-                }
+            <CardContent className="space-y-5 text-sm">
+              <MilestoneProgressBar
+                label="First Response"
+                history={slaHistory}
+                deadline={slaDeadline(firstResponseSla)}
+                now={firstResponseCurrent}
+                status={slaStatus(firstResponseSla, firstResponseCurrent)}
+                progressPct={slaProgress(firstResponseSla, firstResponseCurrent)}
+                ticketCreated={new Date(ticket.zammad_created_at)}
               />
-              <Info
+              <MilestoneProgressBar
                 label="Resolution"
-                value={
-                  ticket.resolution_time_secs == null ? "In progress" : formatSeconds(ticket.resolution_time_secs)
-                }
+                history={slaHistory}
+                deadline={slaDeadline(resolutionSla)}
+                now={resolutionCurrent}
+                status={slaStatus(resolutionSla, resolutionCurrent)}
+                progressPct={slaProgress(resolutionSla, resolutionCurrent)}
+                ticketCreated={new Date(ticket.zammad_created_at)}
               />
-              <Info label="First response breached" value={ticket.first_response_breached ? "Yes" : "No"} />
-              <Info label="Close breached" value={ticket.close_breached ? "Yes" : "No"} />
+              <div className="grid grid-cols-2 gap-3 border-t pt-3">
+                <Info label="First reply" value={ticket.first_reply_time_secs == null ? "Pending" : formatSeconds(ticket.first_reply_time_secs)} />
+                <Info label="Resolution" value={ticket.resolution_time_secs == null ? "In progress" : formatSeconds(ticket.resolution_time_secs)} />
+              </div>
             </CardContent>
           </Card>
 

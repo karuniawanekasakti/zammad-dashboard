@@ -1,4 +1,5 @@
 import { slaDeadline, slaProgress, slaRemainingMs, slaStatus } from "@/lib/sla-deadline";
+import { ARTICLE_PAGE_SIZE } from "@/lib/article-pagination";
 import {
   agentStats,
   alertRules,
@@ -376,10 +377,15 @@ const mockApi = {
     return delay({ rows, total });
   },
 
-  async getTicket(id: string): Promise<{ ticket: Ticket; articles: TicketArticle[] } | null> {
+  async getTicket(id: string): Promise<{ ticket: Ticket; articles: TicketArticle[]; total: number } | null> {
     const t = liveTickets().find((x) => x.id === id);
     if (!t) return delay(null);
-    return delay({ ticket: t, articles: articlesForTicket(id) });
+    const all = articlesForTicket(id);
+    return delay({ ticket: t, articles: all.slice(0, ARTICLE_PAGE_SIZE), total: all.length });
+  },
+
+  async getTicketArticles(id: string, offset: number): Promise<TicketArticle[]> {
+    return delay(articlesForTicket(id).slice(offset, offset + ARTICLE_PAGE_SIZE));
   },
 
   async getTicketHistory(id: string): Promise<TicketHistory[]> {

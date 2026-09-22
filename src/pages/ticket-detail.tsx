@@ -9,6 +9,7 @@ import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { VirtualizedArticleList, appendArticlePage } from "@/components/tickets/virtualized-article-list";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Timeline,
@@ -98,6 +99,37 @@ export default function TicketDetailPage() {
 
   const { ticket } = data;
   const timelineHistory = history.length ? history : fallbackHistory(ticket, articles);
+  const slaHistory: TicketHistory[] = [
+    ...history,
+    ...articles
+      .filter((article) => !article.internal && article.author_role !== "system")
+      .map((article) => ({
+        id: `${article.id}-sla`,
+        type: article.author_role === "customer" ? "customer_reply" : "agent_reply",
+        created_at: article.created_at,
+      })),
+  ];
+  const now = new Date();
+  const firstResponseSla = {
+    ...ticket,
+    escalation_at: ticket.first_response_escalation_at,
+    update_escalation_at: null,
+    close_escalation_at: null,
+    update_diff_in_min: null,
+    close_diff_in_min: null,
+    close_breached: false,
+  };
+  const resolutionSla = {
+    ...ticket,
+    escalation_at: ticket.close_escalation_at,
+    first_response_escalation_at: null,
+    update_escalation_at: null,
+    first_response_diff_in_min: null,
+    update_diff_in_min: null,
+    first_response_breached: false,
+  };
+  const firstResponseCurrent = ticket.first_response_at ? new Date(ticket.first_response_at) : now;
+  const resolutionCurrent = ticket.close_at || ticket.closed_at ? new Date(ticket.close_at ?? ticket.closed_at!) : now;
   const hasMore = articles.length < total;
 
   const loadMore = () => {
@@ -186,12 +218,18 @@ export default function TicketDetailPage() {
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">
-                <Clock className="size-4" /> SLA activity
+                <Clock className="size-4" /> History
               </CardTitle>
-              <CardDescription>SLA events and ticket articles in chronological order</CardDescription>
+              <CardDescription>{historyError ? "Endpoint history gagal, menampilkan aktivitas lokal" : "Timeline aktivitas ticket dari Zammad"}</CardDescription>
             </CardHeader>
             <CardContent>
-              <SlaActivityTimeline history={history} articles={articles} loading={historyLoading} error={historyError} />
+              <TicketHistoryTimeline
+                ticket={ticket}
+                articleCount={articles.length}
+                history={timelineHistory}
+                loading={historyLoading && !timelineHistory.length}
+                error={false}
+              />
             </CardContent>
           </Card>
         </div>
@@ -344,6 +382,39 @@ function readableHref(href: string | null) {
   } catch {
     return null;
   }
+}
+
+function fallbackHistory(ticket: Ticket, articles: TicketArticle[]): TicketHistory[] {
+  return [
+    {
+      id: `${ticket.id}-created`,
+      type: "created",
+      title: "Ticket created",
+      created_by: ticket.customer_name,
+      created_at: ticket.zammad_created_at,
+      object: "Ticket",
+      to: ticket.state,
+    },
+    ...articles.map((article) => ({
+      id: `${article.id}-history`,
+      type: "created",
+      object: "Article",
+      title: article.internal ? "Internal note added" : "Article added",
+      body: article.body,
+      created_by: article.author_name,
+      created_at: article.created_at,
+    })),
+    {
+      id: `${ticket.id}-updated`,
+      type: "state",
+      attribute: "state",
+      title: "Ticket updated",
+      created_by: ticket.owner_name ?? "System",
+      created_at: ticket.zammad_updated_at,
+      from: "new",
+      to: ticket.state,
+    },
+  ];
 }
 
 const SLA_EVENT_META: Record<SlaEventType, { icon: typeof Clock; className: string }> = {

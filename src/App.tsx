@@ -11,6 +11,7 @@ import AgentDetailPage from "@/pages/agent-detail";
 import GroupsPage from "@/pages/groups";
 import GroupDetailPage from "@/pages/group-detail";
 import SlaPage from "@/pages/sla";
+import SlaDetailPage from "@/pages/sla-detail";
 import PerformancePage from "@/pages/performance";
 import ReportsPage from "@/pages/reports";
 import AlertsPage from "@/pages/alerts";
@@ -32,6 +33,7 @@ export default function App() {
         <Route path="/groups" element={<RequireAuth roles={["admin", "team_lead", "project_manager"]}><GroupsPage /></RequireAuth>} />
         <Route path="/groups/:id" element={<GroupDetailPage />} />
         <Route path="/sla" element={<RequireAuth roles={["admin", "team_lead", "project_manager"]}><SlaPage /></RequireAuth>} />
+        <Route path="/sla/detail/:id" element={<RequireAuth roles={["admin", "team_lead", "project_manager"]}><SlaDetailPage /></RequireAuth>} />
         <Route path="/performance" element={<RequireAuth roles={["admin", "team_lead", "project_manager"]}><PerformancePage /></RequireAuth>} />
         <Route path="/reports" element={<ReportsPage />} />
         <Route path="/alerts" element={<AlertsPage />} />

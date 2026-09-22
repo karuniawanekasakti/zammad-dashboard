@@ -27,6 +27,7 @@ import { MilestoneProgressBar } from "@/components/milestone-progress-bar";
 import { slaDeadline, slaProgress, slaStatus } from "@/lib/sla-deadline";
 import { cn, formatSeconds } from "@/lib/utils";
 import { mergeSlaTimeline, type SlaEventType, type SlaTimelineEntry } from "@/lib/sla-timeline";
+import SlaDetailPage from "@/pages/sla-detail";
 import type { Ticket, TicketArticle, TicketHistory } from "@/types";
 
 const ICONS = {
@@ -71,6 +72,7 @@ export default function TicketDetailPage() {
   // the ticket, and each "Load More" appends the next page.
   const [articles, setArticles] = useState<TicketArticle[]>([]);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [showSlaDetail, setShowSlaDetail] = useState(false);
   const scrollKey = `ticket:${id}:scroll`;
   const articlesKey = `ticket:${id}:articles`;
 
@@ -167,6 +169,7 @@ export default function TicketDetailPage() {
     );
   };
 
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -177,6 +180,7 @@ export default function TicketDetailPage() {
           </Link>
         </Button>
       </div>
+      <Button variant="outline" size="sm" onClick={() => setShowSlaDetail(true)}>View SLA Detail</Button>
 
       <PageHeader
         title={`#${ticket.number} · ${ticket.title}`}
@@ -193,6 +197,8 @@ export default function TicketDetailPage() {
           </span>
         }
       />
+
+      {showSlaDetail && <SlaDetailPage isInline onClose={() => setShowSlaDetail(false)} ticketId={ticket.id} />}
 
       {/* The page is the scroll container, so appending a page preserves the
           current offset without replacing or repositioning existing rows. */}

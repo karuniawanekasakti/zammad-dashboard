@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { ChevronDown, ChevronRight, Users } from "lucide-react";
-import { Link } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -181,6 +181,7 @@ function StatCard({ title, value, className }: { title: string; value: number; c
 }
 
 function TicketTable({ rows }: { rows: SlaMonitorTicket[] }) {
+  const navigate = useNavigate();
   return (
     <Table>
       <TableHeader>
@@ -196,9 +197,18 @@ function TicketTable({ rows }: { rows: SlaMonitorTicket[] }) {
         {rows.map((ticket) => {
           const meta = STATUS_META[ticket.live_sla_status];
           return (
-            <TableRow key={ticket.id}>
+            <TableRow
+              key={ticket.id}
+              role="link"
+              tabIndex={0}
+              className="cursor-pointer"
+              onClick={() => navigate(`/sla/detail/${ticket.id}`)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") navigate(`/sla/detail/${ticket.id}`);
+              }}
+            >
               <TableCell className="font-mono text-xs">
-                <Link className="hover:underline" to={`/sla/detail/${ticket.id}`}>#{ticket.number}</Link>
+                <span className="hover:underline">#{ticket.number}</span>
                 <span className="ml-2 font-sans text-sm">{ticket.title}</span>
               </TableCell>
               <TableCell>

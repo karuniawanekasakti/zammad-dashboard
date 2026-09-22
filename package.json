@@ -15,6 +15,7 @@
     "check:articles": "node --experimental-strip-types check_article_pagination.ts",
     "check:overview": "node --experimental-strip-types check_overview_severity.ts",
     "check:metrics": "node --experimental-strip-types check_sla_manager_metrics.ts",
+    "check:sla-navigation": "node --experimental-strip-types check_sla_detail_navigation.ts",
     "preview": "vite preview"
   },
   "dependencies": {

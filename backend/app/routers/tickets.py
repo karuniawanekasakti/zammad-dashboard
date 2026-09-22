@@ -11,7 +11,7 @@ from app.db_models import TicketRow
 from app.deps import get_current_user, get_db
 from app.freshness import dataset_freshness
 from app.models import ApiResponse, TicketArticleOut, TicketHistoryOut, TicketOut
-from app.repositories import get_articles_for_ticket, get_setting, get_state_history, list_groups as list_group_rows, list_tickets as list_ticket_rows, upsert_articles, upsert_ticket
+from app.repositories import count_articles_for_ticket, get_articles_for_ticket, get_setting, get_state_history, list_groups as list_group_rows, list_tickets as list_ticket_rows, upsert_articles, upsert_ticket
 from app.ticket_table import apply_advanced_filters, apply_table_sorts
 from app.zammad_client import zammad
 
@@ -715,19 +715,36 @@ async def overview(
     })
 
 
+# Articles stream in fixed pages so a long conversation never loads in one
+# response; the offset is page-aligned and the rows are ordered by creation so
+# appending a page can never duplicate or reorder what the reader already has.
+ARTICLES_PAGE_SIZE = 20
+
+
 @router.get("/{ticket_id}", response_model=ApiResponse)
 async def get_ticket(ticket_id: int, current: Annotated[dict, Depends(get_current_user)], db: Annotated[AsyncSession, Depends(get_db)]):
-    cached = await cache_get(f"ticket:{ticket_id}")
-    if cached:
-        # The cached ticket holds the row's own facts; the live SLA fields are
-        # recomputed here so a cached read cannot disagree with the SLA Monitor.
-        return ApiResponse(data={**cached, "ticket": ticket_payload(TicketOut.model_validate(cached["ticket"]))})
+    return ApiResponse(data=await _ticket_page(db, ticket_id, offset=0))
 
-    # Read from DB (synced by workers). Backfill from Zammad only on a miss so
-    # steady-state reads never hit Zammad, but the UI never 404s on new tickets.
+
+@router.get("/{ticket_id}/articles", response_model=ApiResponse)
+async def get_ticket_articles(
+    ticket_id: int,
+    current: Annotated[dict, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    offset: Annotated[int, Query(ge=0)] = 0,
+):
+    page = await _ticket_page(db, ticket_id, offset=offset)
+    if page is None:
+        return ApiResponse(data=None)
+    return ApiResponse(data={"articles": page["articles"], "total": page["total"]})
+
+
+async def _ticket_page(db: AsyncSession, ticket_id: int, offset: int) -> dict | None:
     row = await db.get(TicketRow, str(ticket_id))
-    articles = await get_articles_for_ticket(db, str(ticket_id))
-    if row is None or not articles:
+    total = await count_articles_for_ticket(db, str(ticket_id))
+    if row is None or total == 0:
+        # Backfill from Zammad only on a miss so steady-state reads never hit
+        # Zammad, but the UI never 404s on a ticket the workers have not seen.
         try:
             raw = await zammad.get_ticket(ticket_id)
             ticket = _map_ticket(raw)
@@ -735,25 +752,26 @@ async def get_ticket(ticket_id: int, current: Annotated[dict, Depends(get_curren
 
             from app.repositories import upsert_articles as _upsert_articles, upsert_history as _upsert_history
             articles_raw = await zammad.get_ticket_articles(ticket_id)
-            articles = [_map_article(a, ticket_id) for a in articles_raw]
-            await _upsert_articles(db, articles)
+            mapped = [_map_article(a, ticket_id) for a in articles_raw]
+            await _upsert_articles(db, mapped)
             await _upsert_history(db, _map_history(await zammad.get_ticket_history(ticket_id), ticket_id))
             await db.commit()
             row = TicketRow(**ticket.model_dump())
+            total = len(mapped)
         except Exception:
             if row is None:
-                return ApiResponse(data=None)
+                return None
 
     if row is None:
-        return ApiResponse(data=None)
+        return None
 
+    articles = await get_articles_for_ticket(db, str(ticket_id), limit=ARTICLES_PAGE_SIZE, offset=offset)
     ticket = _row_to_ticket(row)
-    articles_payload = [TicketArticleOut.model_validate(a, from_attributes=True).model_dump() for a in articles]
-    # Cache the ticket's stored facts; the time-relative SLA fields are
-    # recomputed on every read (cache hits included) so a cached read can never
-    # disagree with the SLA Monitor.
-    await cache_set(f"ticket:{ticket_id}", {"ticket": ticket.model_dump(mode="json"), "articles": articles_payload}, ttl=60)
-    return ApiResponse(data={"ticket": ticket_payload(ticket), "articles": articles_payload})
+    return {
+        "ticket": ticket_payload(ticket),
+        "articles": [TicketArticleOut.model_validate(a, from_attributes=True).model_dump() for a in articles],
+        "total": total,
+    }
 
 
 @history_router.get("/ticket_history/{ticket_id}", response_model=ApiResponse)

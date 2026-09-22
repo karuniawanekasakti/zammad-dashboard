@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ArrowDownUp, ArrowLeft, AlertTriangle, Bell, ChevronDown, ChevronUp, Clock, FileText, Lock, Mail, MessageSquare, Phone, RefreshCw, RotateCcw, Tag, User } from "lucide-react";
 import { format, formatDistanceToNow } from "date-fns";
@@ -9,6 +9,7 @@ import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { VirtualizedArticleList, appendArticlePage } from "@/components/tickets/virtualized-article-list";
 import {
   Timeline,
   TimelineContent,
@@ -62,11 +63,74 @@ export default function TicketDetailPage() {
     enabled: !!id,
   });
 
+  // Articles stream in pages of ARTICLE_PAGE_SIZE: the first page arrives with
+  // the ticket, and each "Load More" appends the next page.
+  const [articles, setArticles] = useState<TicketArticle[]>([]);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const scrollKey = `ticket:${id}:scroll`;
+  const articlesKey = `ticket:${id}:articles`;
+
+  useEffect(() => {
+    try {
+      const savedArticles = JSON.parse(sessionStorage.getItem(articlesKey) ?? "null");
+      setArticles(Array.isArray(savedArticles) ? savedArticles : (data?.articles ?? []));
+    } catch {
+      sessionStorage.removeItem(articlesKey);
+      setArticles(data?.articles ?? []);
+    }
+
+    const savedScroll = sessionStorage.getItem(scrollKey);
+    if (savedScroll) requestAnimationFrame(() => requestAnimationFrame(() => window.scrollTo(0, Number(savedScroll))));
+    return () => sessionStorage.setItem(scrollKey, String(window.scrollY));
+  }, [articlesKey, data, scrollKey]);
+
+  useEffect(() => {
+    if (articles.length) sessionStorage.setItem(articlesKey, JSON.stringify(articles));
+  }, [articles, articlesKey]);
+
+  const total = data?.total ?? 0;
+
   if (isLoading) return <PageLoader />;
   if (!data) return <div className="text-sm text-muted-foreground">Ticket not found.</div>;
 
-  const { ticket, articles } = data;
+  const { ticket } = data;
   const timelineHistory = history.length ? history : fallbackHistory(ticket, articles);
+  const hasMore = articles.length < total;
+
+  const loadMore = () => {
+    if (loadingMore || !hasMore) return;
+    setLoadingMore(true);
+    api
+      .getTicketArticles(ticket.id, articles.length)
+      .then((page) => setArticles((current) => appendArticlePage(current, page)))
+      .finally(() => setLoadingMore(false));
+  };
+
+  const renderArticle = (a: TicketArticle) => {
+    const Icon = ICONS[a.type];
+    return (
+      <article data-article-id={a.id} key={a.id} className="border rounded-lg p-3">
+        <div className="flex items-center justify-between gap-2 mb-2">
+          <div className="flex items-center gap-2 text-sm">
+            <span className="font-medium">{a.author_name}</span>
+            <Badge variant={a.author_role === "customer" ? "secondary" : "default"} className="capitalize">
+              {a.author_role}
+            </Badge>
+            {a.internal && (
+              <Badge variant="warning" className="gap-1">
+                <Lock className="size-3" /> Internal
+              </Badge>
+            )}
+          </div>
+          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <Icon className="size-3.5" />
+            <span>{format(new Date(a.created_at), "PPp")}</span>
+          </div>
+        </div>
+        <ArticleBody body={a.body} />
+      </article>
+    );
+  };
 
   return (
     <div className="space-y-6">
@@ -95,39 +159,24 @@ export default function TicketDetailPage() {
         }
       />
 
+      {/* The page is the scroll container, so appending a page preserves the
+          current offset without replacing or repositioning existing rows. */}
       <div className="grid gap-4 lg:grid-cols-3">
         <div className="lg:col-span-2 space-y-4">
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-base">Conversation</CardTitle>
-              <CardDescription>{articles.length} articles</CardDescription>
+              <CardDescription>{total} articles</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
-              {articles.map((a) => {
-                const Icon = ICONS[a.type];
-                return (
-                  <div key={a.id} className="border rounded-lg p-3">
-                    <div className="flex items-center justify-between gap-2 mb-2">
-                      <div className="flex items-center gap-2 text-sm">
-                        <span className="font-medium">{a.author_name}</span>
-                        <Badge variant={a.author_role === "customer" ? "secondary" : "default"} className="capitalize">
-                          {a.author_role}
-                        </Badge>
-                        {a.internal && (
-                          <Badge variant="warning" className="gap-1">
-                            <Lock className="size-3" /> Internal
-                          </Badge>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                        <Icon className="size-3.5" />
-                        <span>{format(new Date(a.created_at), "PPp")}</span>
-                      </div>
-                    </div>
-                    <ArticleBody body={a.body} />
-                  </div>
-                );
-              })}
+            <CardContent>
+              <VirtualizedArticleList
+                articles={articles}
+                total={total}
+                hasMore={hasMore}
+                loadingMore={loadingMore}
+                onLoadMore={loadMore}
+                renderArticle={renderArticle}
+              />
             </CardContent>
           </Card>
 
@@ -251,7 +300,13 @@ function renderArticleNode(node: ChildNode, key: string): ReactNode {
     case "a": {
       const href = readableHref(element.getAttribute("href"));
       return href ? (
-        <a key={key} href={href} target="_blank" rel="noreferrer" className="text-primary underline underline-offset-2">
+        <a
+          key={key}
+          href={href}
+          target="_blank"
+          rel="noreferrer"
+          className="text-primary underline underline-offset-2"
+        >
           {children}
         </a>
       ) : (

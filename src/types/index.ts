@@ -148,6 +148,22 @@ export interface SlaMonitorData {
   tickets: SlaMonitorTicket[];
   risk_rows: SlaMonitorTicket[];
   breach_log: Ticket[];
+  manager_metrics: Record<ManagerMetricsPeriod, SlaManagerMetrics> | null;
+}
+
+// Periods a manager reviews SLA performance over. Distinct from
+// `OverviewPeriod`: the overview charts buckets by day/week/month/year, while
+// these are the reporting windows the metrics header rolls up.
+export type ManagerMetricsPeriod = "week" | "month" | "quarter" | "year";
+
+export interface SlaManagerMetrics {
+  /** Share of monitored tickets that met SLA, 0-100. */
+  compliance_rate: number;
+  active_breaches: number;
+  /** Change against the same-length period before this one, in points. */
+  trend_percentage: number;
+  /** Mean minutes between creation and breach; null when nothing breached. */
+  average_breach_time_minutes: number | null;
 }
 
 export interface TicketArticle {

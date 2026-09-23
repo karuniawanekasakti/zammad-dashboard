@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
-import { ArrowDownUp, ArrowLeft, AlertTriangle, Bell, ChevronDown, ChevronUp, Clock, FileText, Lock, Mail, MessageSquare, Phone, RefreshCw, RotateCcw, Tag, User } from "lucide-react";
+import { ArrowDownUp, ArrowLeft, AlertTriangle, Bell, CheckCircle2, ChevronDown, ChevronUp, Clock, FileText, Lock, Mail, MessageSquare, Pause, Phone, Play, RefreshCw, RotateCcw, Tag, TriangleAlert, User } from "lucide-react";
 import { format, formatDistanceToNow } from "date-fns";
 import { api } from "@/lib/api";
 import { PageLoader } from "@/components/spinner";
@@ -9,6 +9,8 @@ import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { VirtualizedArticleList, appendArticlePage } from "@/components/tickets/virtualized-article-list";
 import {
   Timeline,
   TimelineContent,
@@ -21,7 +23,12 @@ import {
 } from "@/components/reui/timeline";
 import { PriorityBadge, StateBadge } from "@/components/status-badges";
 import { SlaBadge } from "@/components/sla-badge";
+import { InlineSlaPanel } from "@/components/sla/inline-sla-panel";
+import { MilestoneProgressBar } from "@/components/milestone-progress-bar";
+import { slaDeadline, slaProgress, slaStatus } from "@/lib/sla-deadline";
 import { cn, formatSeconds } from "@/lib/utils";
+import { mergeSlaTimeline, type SlaEventType, type SlaTimelineEntry } from "@/lib/sla-timeline";
+import SlaDetailPage from "@/pages/sla-detail";
 import type { Ticket, TicketArticle, TicketHistory } from "@/types";
 
 const ICONS = {
@@ -62,11 +69,106 @@ export default function TicketDetailPage() {
     enabled: !!id,
   });
 
+  // Articles stream in pages of ARTICLE_PAGE_SIZE: the first page arrives with
+  // the ticket, and each "Load More" appends the next page.
+  const [articles, setArticles] = useState<TicketArticle[]>([]);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [isOpen, setIsOpen] = useState(false);
+  const scrollKey = `ticket:${id}:scroll`;
+  const articlesKey = `ticket:${id}:articles`;
+
+  useEffect(() => {
+    try {
+      const savedArticles = JSON.parse(sessionStorage.getItem(articlesKey) ?? "null");
+      setArticles(Array.isArray(savedArticles) ? savedArticles : (data?.articles ?? []));
+    } catch {
+      sessionStorage.removeItem(articlesKey);
+      setArticles(data?.articles ?? []);
+    }
+
+    const savedScroll = sessionStorage.getItem(scrollKey);
+    if (savedScroll) requestAnimationFrame(() => requestAnimationFrame(() => window.scrollTo(0, Number(savedScroll))));
+    return () => sessionStorage.setItem(scrollKey, String(window.scrollY));
+  }, [articlesKey, data, scrollKey]);
+
+  useEffect(() => {
+    if (articles.length) sessionStorage.setItem(articlesKey, JSON.stringify(articles));
+  }, [articles, articlesKey]);
+
+  const total = data?.total ?? 0;
+
   if (isLoading) return <PageLoader />;
   if (!data) return <div className="text-sm text-muted-foreground">Ticket not found.</div>;
 
-  const { ticket, articles } = data;
-  const timelineHistory = history.length ? history : fallbackHistory(ticket, articles);
+  const { ticket } = data;
+  const slaHistory: TicketHistory[] = [
+    ...history,
+    ...articles
+      .filter((article) => !article.internal && article.author_role !== "system")
+      .map((article) => ({
+        id: `${article.id}-sla`,
+        type: article.author_role === "customer" ? "customer_reply" : "agent_reply",
+        created_at: article.created_at,
+      })),
+  ];
+  const now = new Date();
+  const firstResponseSla = {
+    ...ticket,
+    escalation_at: ticket.first_response_escalation_at,
+    update_escalation_at: null,
+    close_escalation_at: null,
+    update_diff_in_min: null,
+    close_diff_in_min: null,
+    close_breached: false,
+  };
+  const resolutionSla = {
+    ...ticket,
+    escalation_at: ticket.close_escalation_at,
+    first_response_escalation_at: null,
+    update_escalation_at: null,
+    first_response_diff_in_min: null,
+    update_diff_in_min: null,
+    first_response_breached: false,
+  };
+  const firstResponseCurrent = ticket.first_response_at ? new Date(ticket.first_response_at) : now;
+  const resolutionCurrent = ticket.close_at || ticket.closed_at ? new Date(ticket.close_at ?? ticket.closed_at!) : now;
+  const hasMore = articles.length < total;
+
+  const loadMore = () => {
+    if (loadingMore || !hasMore) return;
+    setLoadingMore(true);
+    api
+      .getTicketArticles(ticket.id, articles.length)
+      .then((page) => setArticles((current) => appendArticlePage(current, page)))
+      .finally(() => setLoadingMore(false));
+  };
+
+  const renderArticle = (a: TicketArticle) => {
+    const Icon = ICONS[a.type];
+    return (
+      <article data-article-id={a.id} key={a.id} className="border rounded-lg p-3">
+        <div className="flex items-center justify-between gap-2 mb-2">
+          <div className="flex items-center gap-2 text-sm">
+            <span className="font-medium">{a.author_name}</span>
+            <Badge variant={a.author_role === "customer" ? "secondary" : "default"} className="capitalize">
+              {a.author_role}
+            </Badge>
+            {a.internal && (
+              <Badge variant="warning" className="gap-1">
+                <Lock className="size-3" /> Internal
+              </Badge>
+            )}
+          </div>
+          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <Icon className="size-3.5" />
+            <span>{format(new Date(a.created_at), "PPp")}</span>
+          </div>
+        </div>
+        <ArticleBody body={a.body} />
+      </article>
+    );
+  };
+
 
   return (
     <div className="space-y-6">
@@ -85,7 +187,13 @@ export default function TicketDetailPage() {
           <span className="flex items-center gap-2 text-sm flex-wrap">
             <StateBadge state={ticket.state} />
             <PriorityBadge priority={ticket.priority} />
-            <SlaBadge status={ticket.live_sla_status} remainingMs={ticket.sla_remaining_ms} />
+            <SlaBadge
+              status={ticket.live_sla_status}
+              remainingMs={ticket.sla_remaining_ms}
+              onClick={() => setIsOpen(true)}
+              expanded={isOpen}
+              controls="sla-detail-inline-panel"
+            />
             {ticket.reopen_count > 0 && (
               <Badge variant="muted" className="gap-1">
                 <RotateCcw className="size-3" /> Reopened × {ticket.reopen_count}
@@ -95,57 +203,41 @@ export default function TicketDetailPage() {
         }
       />
 
+      {isOpen && (
+        <InlineSlaPanel onClose={() => setIsOpen(false)}>
+          <SlaDetailPage isInline ticketId={ticket.id} />
+        </InlineSlaPanel>
+      )}
+      {/* The page is the scroll container, so appending a page preserves the
+          current offset without replacing or repositioning existing rows. */}
       <div className="grid gap-4 lg:grid-cols-3">
         <div className="lg:col-span-2 space-y-4">
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-base">Conversation</CardTitle>
-              <CardDescription>{articles.length} articles</CardDescription>
+              <CardDescription>{total} articles</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
-              {articles.map((a) => {
-                const Icon = ICONS[a.type];
-                return (
-                  <div key={a.id} className="border rounded-lg p-3">
-                    <div className="flex items-center justify-between gap-2 mb-2">
-                      <div className="flex items-center gap-2 text-sm">
-                        <span className="font-medium">{a.author_name}</span>
-                        <Badge variant={a.author_role === "customer" ? "secondary" : "default"} className="capitalize">
-                          {a.author_role}
-                        </Badge>
-                        {a.internal && (
-                          <Badge variant="warning" className="gap-1">
-                            <Lock className="size-3" /> Internal
-                          </Badge>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                        <Icon className="size-3.5" />
-                        <span>{format(new Date(a.created_at), "PPp")}</span>
-                      </div>
-                    </div>
-                    <ArticleBody body={a.body} />
-                  </div>
-                );
-              })}
+            <CardContent>
+              <VirtualizedArticleList
+                articles={articles}
+                total={total}
+                hasMore={hasMore}
+                loadingMore={loadingMore}
+                onLoadMore={loadMore}
+                renderArticle={renderArticle}
+              />
             </CardContent>
           </Card>
 
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">
-                <Clock className="size-4" /> History
+                <Clock className="size-4" /> SLA activity
               </CardTitle>
-              <CardDescription>{historyError ? "Endpoint history gagal, menampilkan aktivitas lokal" : "Timeline aktivitas ticket dari Zammad"}</CardDescription>
+              <CardDescription>SLA events and ticket articles in chronological order</CardDescription>
             </CardHeader>
             <CardContent>
-              <TicketHistoryTimeline
-                ticket={ticket}
-                articleCount={articles.length}
-                history={timelineHistory}
-                loading={historyLoading && !timelineHistory.length}
-                error={false}
-              />
+              <SlaActivityTimeline history={history} articles={articles} loading={historyLoading} error={historyError} />
             </CardContent>
           </Card>
         </div>
@@ -169,26 +261,31 @@ export default function TicketDetailPage() {
               />
             </CardContent>
           </Card>
-
           <Card>
             <CardHeader className="pb-2"><CardTitle className="text-base">SLA</CardTitle></CardHeader>
-            <CardContent className="space-y-3 text-sm">
-              <Info
-                label="First reply"
-                value={
-                  ticket.first_reply_time_secs == null
-                    ? "Pending"
-                    : formatSeconds(ticket.first_reply_time_secs)
-                }
+            <CardContent className="space-y-5 text-sm">
+              <MilestoneProgressBar
+                label="First Response"
+                history={slaHistory}
+                deadline={slaDeadline(firstResponseSla)}
+                now={firstResponseCurrent}
+                status={slaStatus(firstResponseSla, firstResponseCurrent)}
+                progressPct={slaProgress(firstResponseSla, firstResponseCurrent)}
+                ticketCreated={new Date(ticket.zammad_created_at)}
               />
-              <Info
+              <MilestoneProgressBar
                 label="Resolution"
-                value={
-                  ticket.resolution_time_secs == null ? "In progress" : formatSeconds(ticket.resolution_time_secs)
-                }
+                history={slaHistory}
+                deadline={slaDeadline(resolutionSla)}
+                now={resolutionCurrent}
+                status={slaStatus(resolutionSla, resolutionCurrent)}
+                progressPct={slaProgress(resolutionSla, resolutionCurrent)}
+                ticketCreated={new Date(ticket.zammad_created_at)}
               />
-              <Info label="First response breached" value={ticket.first_response_breached ? "Yes" : "No"} />
-              <Info label="Close breached" value={ticket.close_breached ? "Yes" : "No"} />
+              <div className="grid grid-cols-2 gap-3 border-t pt-3">
+                <Info label="First reply" value={ticket.first_reply_time_secs == null ? "Pending" : formatSeconds(ticket.first_reply_time_secs)} />
+                <Info label="Resolution" value={ticket.resolution_time_secs == null ? "In progress" : formatSeconds(ticket.resolution_time_secs)} />
+              </div>
             </CardContent>
           </Card>
 
@@ -251,7 +348,13 @@ function renderArticleNode(node: ChildNode, key: string): ReactNode {
     case "a": {
       const href = readableHref(element.getAttribute("href"));
       return href ? (
-        <a key={key} href={href} target="_blank" rel="noreferrer" className="text-primary underline underline-offset-2">
+        <a
+          key={key}
+          href={href}
+          target="_blank"
+          rel="noreferrer"
+          className="text-primary underline underline-offset-2"
+        >
           {children}
         </a>
       ) : (
@@ -289,38 +392,66 @@ function readableHref(href: string | null) {
   }
 }
 
-function fallbackHistory(ticket: Ticket, articles: TicketArticle[]): TicketHistory[] {
-  return [
-    {
-      id: `${ticket.id}-created`,
-      type: "created",
-      title: "Ticket created",
-      created_by: ticket.customer_name,
-      created_at: ticket.zammad_created_at,
-      object: "Ticket",
-      to: ticket.state,
-    },
-    ...articles.map((article) => ({
-      id: `${article.id}-history`,
-      type: "created",
-      object: "Article",
-      title: article.internal ? "Internal note added" : "Article added",
-      body: article.body,
-      created_by: article.author_name,
-      created_at: article.created_at,
-    })),
-    {
-      id: `${ticket.id}-updated`,
-      type: "state",
-      attribute: "state",
-      title: "Ticket updated",
-      created_by: ticket.owner_name ?? "System",
-      created_at: ticket.zammad_updated_at,
-      from: "new",
-      to: ticket.state,
-    },
-  ];
+const SLA_EVENT_META: Record<SlaEventType, { icon: typeof Clock; className: string }> = {
+  sla_start: { icon: Play, className: "text-blue-600" },
+  sla_pause: { icon: Pause, className: "text-amber-600" },
+  sla_resume: { icon: Play, className: "text-blue-600" },
+  sla_warning: { icon: TriangleAlert, className: "text-amber-600" },
+  sla_critical: { icon: AlertTriangle, className: "text-orange-600" },
+  sla_breach: { icon: AlertTriangle, className: "text-destructive" },
+  sla_milestone_complete: { icon: CheckCircle2, className: "text-emerald-600" },
+};
+
+export function SlaActivityTimeline({ history, articles, loading, error }: { history: TicketHistory[]; articles: TicketArticle[]; loading: boolean; error: boolean }) {
+  const entries = useMemo(() => mergeSlaTimeline(history, articles), [history, articles]);
+
+  if (loading) return <TimelineSkeleton />;
+  if (error) return <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">SLA history could not be loaded.</div>;
+  if (!entries.length) return <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">No activities attached to this ticket.</div>;
+
+  const renderEntries = (rows: SlaTimelineEntry[]) => rows.length ? (
+    <Timeline defaultValue={rows.length} className="mt-4 gap-5">
+      {rows.map((entry, index) => <SlaActivityItem key={entry.id} entry={entry} step={index + 1} />)}
+    </Timeline>
+  ) : <div className="mt-4 rounded-lg border border-dashed p-6 text-sm text-muted-foreground">No SLA events recorded.</div>;
+
+  return (
+    <Tabs defaultValue="sla">
+      <TabsList>
+        <TabsTrigger value="sla">SLA Events Only</TabsTrigger>
+        <TabsTrigger value="full">Full History</TabsTrigger>
+      </TabsList>
+      <TabsContent value="sla">{renderEntries(entries.filter((entry) => entry.type !== "article"))}</TabsContent>
+      <TabsContent value="full">{renderEntries(entries)}</TabsContent>
+    </Tabs>
+  );
 }
+
+function SlaActivityItem({ entry, step }: { entry: SlaTimelineEntry; step: number }) {
+  const article = entry.type === "article";
+  const meta = article ? { icon: ICONS[entry.articleType ?? "note"], className: "text-emerald-600" } : SLA_EVENT_META[entry.type];
+  const Icon = meta.icon;
+  return (
+    <TimelineItem step={step} className="pb-5 last:pb-0">
+      <TimelineSeparator className="bg-border" />
+      <TimelineIndicator className="flex size-7 items-center justify-center border bg-background shadow-sm">
+        <Icon className={cn("size-3.5", meta.className)} />
+      </TimelineIndicator>
+      <TimelineHeader className="rounded-lg border bg-background p-3">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <TimelineTitle>{entry.label}</TimelineTitle>
+            {article && <><span className="text-sm font-medium">{entry.authorName}</span><Badge variant={entry.authorRole === "customer" ? "secondary" : "default"} className="capitalize">{entry.authorRole}</Badge></>}
+            {article && entry.internal && <Badge variant="warning">Internal</Badge>}
+          </div>
+          <time dateTime={entry.timestamp} className="text-xs text-muted-foreground">{format(new Date(entry.timestamp), "PPp")}</time>
+        </div>
+        {entry.body && <TimelineContent className="mt-3"><ArticleBody body={entry.body} /></TimelineContent>}
+      </TimelineHeader>
+    </TimelineItem>
+  );
+}
+
 
 type NormalizedHistory = ReturnType<typeof normalizeHistory>;
 

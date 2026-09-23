@@ -29,6 +29,7 @@ import type {
 } from "@/types";
 import type { Scope, TicketFilters } from "@/lib/api";
 import { useAuth } from "@/stores/auth";
+import { ARTICLE_PAGE_SIZE } from "@/lib/article-pagination";
 
 const BASE = import.meta.env.VITE_API_BASE ?? "/api/v1";
 
@@ -115,8 +116,13 @@ export const apiClient = {
     return { rows: res.data, total: res.meta?.total ?? res.data.length };
   },
 
-  async getTicket(id: string): Promise<{ ticket: Ticket; articles: TicketArticle[] } | null> {
-    return request(`/tickets/${id}`);
+  async getTicket(id: string): Promise<{ ticket: Ticket; articles: TicketArticle[]; total: number } | null> {
+    const data = await request<{ ticket: Ticket; articles: TicketArticle[]; total: number } | null>(`/tickets/${id}`);
+    return data ? { ticket: data.ticket, articles: data.articles, total: data.total ?? data.articles.length } : null;
+  },
+  async getTicketArticles(id: string, offset: number): Promise<TicketArticle[]> {
+    const data = await request<{ articles: TicketArticle[] } | null>(`/tickets/${id}/articles${qs({ offset, per_page: ARTICLE_PAGE_SIZE })}`);
+    return data?.articles ?? [];
   },
 
   async getTicketHistory(id: string): Promise<TicketHistory[]> {

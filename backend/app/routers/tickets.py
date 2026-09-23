@@ -11,7 +11,7 @@ from app.db_models import TicketRow
 from app.deps import get_current_user, get_db
 from app.freshness import dataset_freshness
 from app.models import ApiResponse, TicketArticleOut, TicketHistoryOut, TicketOut
-from app.repositories import get_articles_for_ticket, get_setting, get_state_history, list_groups as list_group_rows, list_tickets as list_ticket_rows, upsert_articles, upsert_ticket
+from app.repositories import count_articles_for_ticket, get_articles_for_ticket, get_setting, get_state_history, list_groups as list_group_rows, list_tickets as list_ticket_rows, upsert_articles, upsert_ticket
 from app.ticket_table import apply_advanced_filters, apply_table_sorts
 from app.zammad_client import zammad
 
@@ -429,6 +429,43 @@ def _avg_minutes(values: list[int | None]) -> int | None:
 def _status_rank(status: str) -> int:
     return {"breached": 0, "critical": 1, "warning": 2, "on_track": 3, "no_sla": 4}.get(status, 5)
 
+def _manager_metrics(tickets: list[TicketOut], now: datetime, period: str) -> dict:
+    days = {"week": 7, "month": 30, "quarter": 90, "year": 365}.get(period, 30)
+    current_start = now - timedelta(days=days)
+    previous_start = current_start - timedelta(days=days)
+
+    def closed_in(start: datetime, end: datetime) -> list[TicketOut]:
+        return [
+            ticket for ticket in tickets
+            if (closed_at := _as_utc(ticket.close_at or ticket.closed_at)) and start <= closed_at < end
+        ]
+
+    def compliance(rows: list[TicketOut]) -> float:
+        monitored = [ticket for ticket in rows if _sla_outcome_diffs(ticket) or _sla_deadline(ticket)]
+        if not monitored:
+            return 0
+        met = len([ticket for ticket in monitored if _effective_sla_status(ticket, now) != "breached"])
+        return met / len(monitored) * 100
+
+    current = closed_in(current_start, now)
+    previous = closed_in(previous_start, current_start)
+    current_rate = compliance(current)
+    breached = [ticket for ticket in tickets if ticket.state in OPEN_STATES and _effective_sla_status(ticket, now) == "breached"]
+    breach_times = [
+        int((deadline - created).total_seconds() / 60)
+        for ticket in current
+        if _effective_sla_status(ticket, now) == "breached"
+        and (deadline := _sla_deadline(ticket))
+        and (created := _as_utc(ticket.zammad_created_at))
+        and deadline >= created
+    ]
+    return {
+        "compliance_rate": current_rate,
+        "active_breaches": len(breached),
+        "trend_percentage": current_rate - compliance(previous),
+        "average_breach_time_minutes": _avg_minutes(breach_times),
+    }
+
 
 def _build_sla_monitor(tickets: list[TicketOut], now: datetime | None = None, groups: list[tuple[str, str]] | None = None) -> dict:
     now = now or datetime.now(timezone.utc)
@@ -501,6 +538,7 @@ def _build_sla_monitor(tickets: list[TicketOut], now: datetime | None = None, gr
         "tickets": rows,
         "risk_rows": [t for t in rows if t["live_sla_status"] in ("breached", "critical", "warning")],
         "breach_log": [ticket_payload(t, now) for t in breach_log],
+        "manager_metrics": {period: _manager_metrics(tickets, now, period) for period in ("week", "month", "quarter", "year")},
     }
 
 
@@ -715,19 +753,36 @@ async def overview(
     })
 
 
+# Articles stream in fixed pages so a long conversation never loads in one
+# response; the offset is page-aligned and the rows are ordered by creation so
+# appending a page can never duplicate or reorder what the reader already has.
+ARTICLES_PAGE_SIZE = 20
+
+
 @router.get("/{ticket_id}", response_model=ApiResponse)
 async def get_ticket(ticket_id: int, current: Annotated[dict, Depends(get_current_user)], db: Annotated[AsyncSession, Depends(get_db)]):
-    cached = await cache_get(f"ticket:{ticket_id}")
-    if cached:
-        # The cached ticket holds the row's own facts; the live SLA fields are
-        # recomputed here so a cached read cannot disagree with the SLA Monitor.
-        return ApiResponse(data={**cached, "ticket": ticket_payload(TicketOut.model_validate(cached["ticket"]))})
+    return ApiResponse(data=await _ticket_page(db, ticket_id, offset=0))
 
-    # Read from DB (synced by workers). Backfill from Zammad only on a miss so
-    # steady-state reads never hit Zammad, but the UI never 404s on new tickets.
+
+@router.get("/{ticket_id}/articles", response_model=ApiResponse)
+async def get_ticket_articles(
+    ticket_id: int,
+    current: Annotated[dict, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    offset: Annotated[int, Query(ge=0)] = 0,
+):
+    page = await _ticket_page(db, ticket_id, offset=offset)
+    if page is None:
+        return ApiResponse(data=None)
+    return ApiResponse(data={"articles": page["articles"], "total": page["total"]})
+
+
+async def _ticket_page(db: AsyncSession, ticket_id: int, offset: int) -> dict | None:
     row = await db.get(TicketRow, str(ticket_id))
-    articles = await get_articles_for_ticket(db, str(ticket_id))
-    if row is None or not articles:
+    total = await count_articles_for_ticket(db, str(ticket_id))
+    if row is None or total == 0:
+        # Backfill from Zammad only on a miss so steady-state reads never hit
+        # Zammad, but the UI never 404s on a ticket the workers have not seen.
         try:
             raw = await zammad.get_ticket(ticket_id)
             ticket = _map_ticket(raw)
@@ -735,25 +790,26 @@ async def get_ticket(ticket_id: int, current: Annotated[dict, Depends(get_curren
 
             from app.repositories import upsert_articles as _upsert_articles, upsert_history as _upsert_history
             articles_raw = await zammad.get_ticket_articles(ticket_id)
-            articles = [_map_article(a, ticket_id) for a in articles_raw]
-            await _upsert_articles(db, articles)
+            mapped = [_map_article(a, ticket_id) for a in articles_raw]
+            await _upsert_articles(db, mapped)
             await _upsert_history(db, _map_history(await zammad.get_ticket_history(ticket_id), ticket_id))
             await db.commit()
             row = TicketRow(**ticket.model_dump())
+            total = len(mapped)
         except Exception:
             if row is None:
-                return ApiResponse(data=None)
+                return None
 
     if row is None:
-        return ApiResponse(data=None)
+        return None
 
+    articles = await get_articles_for_ticket(db, str(ticket_id), limit=ARTICLES_PAGE_SIZE, offset=offset)
     ticket = _row_to_ticket(row)
-    articles_payload = [TicketArticleOut.model_validate(a, from_attributes=True).model_dump() for a in articles]
-    # Cache the ticket's stored facts; the time-relative SLA fields are
-    # recomputed on every read (cache hits included) so a cached read can never
-    # disagree with the SLA Monitor.
-    await cache_set(f"ticket:{ticket_id}", {"ticket": ticket.model_dump(mode="json"), "articles": articles_payload}, ttl=60)
-    return ApiResponse(data={"ticket": ticket_payload(ticket), "articles": articles_payload})
+    return {
+        "ticket": ticket_payload(ticket),
+        "articles": [TicketArticleOut.model_validate(a, from_attributes=True).model_dump() for a in articles],
+        "total": total,
+    }
 
 
 @history_router.get("/ticket_history/{ticket_id}", response_model=ApiResponse)

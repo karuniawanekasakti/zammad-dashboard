@@ -1,7 +1,7 @@
 """Data access helpers (write = upsert, read = select)."""
 from datetime import datetime, timezone
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -31,10 +31,18 @@ async def list_tickets(db: AsyncSession) -> list[TicketRow]:
     return (await db.scalars(select(TicketRow))).all()
 
 
-async def get_articles_for_ticket(db: AsyncSession, ticket_id: str) -> list[TicketArticleRow]:
-    return (await db.scalars(
-        select(TicketArticleRow).where(TicketArticleRow.ticket_id == ticket_id)
-    )).all()
+async def get_articles_for_ticket(db: AsyncSession, ticket_id: str, limit: int | None = None, offset: int = 0) -> list[TicketArticleRow]:
+    query = select(TicketArticleRow).where(TicketArticleRow.ticket_id == ticket_id)
+    query = query.order_by(TicketArticleRow.created_at, TicketArticleRow.id).offset(offset)
+    if limit is not None:
+        query = query.limit(limit)
+    return (await db.scalars(query)).all()
+
+
+async def count_articles_for_ticket(db: AsyncSession, ticket_id: str) -> int:
+    return await db.scalar(
+        select(func.count()).select_from(TicketArticleRow).where(TicketArticleRow.ticket_id == ticket_id)
+    ) or 0
 
 
 async def get_state_history(db: AsyncSession) -> list[TicketHistoryRow]:

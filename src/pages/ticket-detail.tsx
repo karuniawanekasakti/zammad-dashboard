@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
-import { ArrowDownUp, ArrowLeft, AlertTriangle, Bell, CheckCircle2, ChevronDown, ChevronUp, Clock, FileText, Lock, Mail, MessageSquare, Pause, Phone, Play, RefreshCw, RotateCcw, Tag, TriangleAlert, User } from "lucide-react";
+import { ArrowDownUp, ArrowLeft, AlertTriangle, Bell, ChevronDown, ChevronUp, Clock, FileText, Lock, Mail, MessageSquare, Phone, RefreshCw, RotateCcw, Tag, User } from "lucide-react";
 import { format, formatDistanceToNow } from "date-fns";
 import { api } from "@/lib/api";
 import { PageLoader } from "@/components/spinner";
@@ -9,7 +9,6 @@ import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { VirtualizedArticleList, appendArticlePage } from "@/components/tickets/virtualized-article-list";
 import {
   Timeline,
@@ -27,7 +26,6 @@ import { InlineSlaPanel } from "@/components/sla/inline-sla-panel";
 import { MilestoneProgressBar } from "@/components/milestone-progress-bar";
 import { slaDeadline, slaProgress, slaStatus } from "@/lib/sla-deadline";
 import { cn, formatSeconds } from "@/lib/utils";
-import { mergeSlaTimeline, type SlaEventType, type SlaTimelineEntry } from "@/lib/sla-timeline";
 import SlaDetailPage from "@/pages/sla-detail";
 import type { Ticket, TicketArticle, TicketHistory } from "@/types";
 
@@ -245,12 +243,12 @@ export default function TicketDetailPage() {
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">
-                <Clock className="size-4" /> SLA activity
+                <Clock className="size-4" /> History
               </CardTitle>
-              <CardDescription>SLA events and ticket articles in chronological order</CardDescription>
+              <CardDescription>Complete ticket history and field changes</CardDescription>
             </CardHeader>
             <CardContent>
-              <SlaActivityTimeline history={history} articles={articles} loading={historyLoading} error={historyError} />
+              <TicketHistoryTimeline ticket={ticket} articleCount={total} history={history} loading={historyLoading} error={historyError} />
             </CardContent>
           </Card>
         </div>
@@ -405,65 +403,6 @@ function readableHref(href: string | null) {
   }
 }
 
-const SLA_EVENT_META: Record<SlaEventType, { icon: typeof Clock; className: string }> = {
-  sla_start: { icon: Clock, className: "text-blue-600" },
-  sla_pause: { icon: Pause, className: "text-amber-600" },
-  sla_resume: { icon: Play, className: "text-blue-600" },
-  sla_warning: { icon: TriangleAlert, className: "text-amber-600" },
-  sla_critical: { icon: AlertTriangle, className: "text-orange-600" },
-  sla_breach: { icon: AlertTriangle, className: "text-destructive" },
-  sla_milestone_complete: { icon: CheckCircle2, className: "text-emerald-600" },
-};
-
-export function SlaActivityTimeline({ history, articles, loading, error }: { history: TicketHistory[]; articles: TicketArticle[]; loading: boolean; error: boolean }) {
-  const entries = useMemo(() => mergeSlaTimeline(history, articles), [history, articles]);
-
-  if (loading) return <TimelineSkeleton />;
-  if (error) return <div className="rounded-lg border border-dashed border-destructive/50 p-6 text-sm text-destructive" role="alert">SLA history could not be loaded — this is a request failure, not an empty timeline.</div>;
-  if (!entries.length) return <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">No activities attached to this ticket.</div>;
-
-  const renderEntries = (rows: SlaTimelineEntry[]) => rows.length ? (
-    <Timeline defaultValue={rows.length} className="mt-4 gap-5">
-      {rows.map((entry, index) => <SlaActivityItem key={entry.id} entry={entry} step={index + 1} />)}
-    </Timeline>
-  ) : <div className="mt-4 rounded-lg border border-dashed p-6 text-sm text-muted-foreground">No SLA events recorded.</div>;
-
-  return (
-    <Tabs defaultValue="sla">
-      <TabsList>
-        <TabsTrigger value="sla">SLA Events Only</TabsTrigger>
-        <TabsTrigger value="full">Full History</TabsTrigger>
-      </TabsList>
-      <TabsContent value="sla">{renderEntries(entries.filter((entry) => entry.type !== "article"))}</TabsContent>
-      <TabsContent value="full">{renderEntries(entries)}</TabsContent>
-    </Tabs>
-  );
-}
-
-function SlaActivityItem({ entry, step }: { entry: SlaTimelineEntry; step: number }) {
-  const article = entry.type === "article";
-  const meta = article ? { icon: ICONS[entry.articleType ?? "note"], className: "text-emerald-600" } : SLA_EVENT_META[entry.type];
-  const Icon = meta.icon;
-  return (
-    <TimelineItem step={step} className="pb-5 last:pb-0">
-      <TimelineSeparator className="bg-border" />
-      <TimelineIndicator className="flex size-7 items-center justify-center border bg-background shadow-sm">
-        <Icon className={cn("size-3.5", meta.className)} />
-      </TimelineIndicator>
-      <TimelineHeader className="rounded-lg border bg-background p-3">
-        <div className="flex flex-wrap items-start justify-between gap-2">
-          <div className="flex flex-wrap items-center gap-2">
-            <TimelineTitle>{entry.label}</TimelineTitle>
-            {article && <><span className="text-sm font-medium">{entry.authorName}</span><Badge variant={entry.authorRole === "customer" ? "secondary" : "default"} className="capitalize">{entry.authorRole}</Badge></>}
-            {article && entry.internal && <Badge variant="warning">Internal</Badge>}
-          </div>
-          <time dateTime={entry.timestamp} className="text-xs text-muted-foreground">{format(new Date(entry.timestamp), "PPp")}</time>
-        </div>
-        {entry.body && <TimelineContent className="mt-3"><ArticleBody body={entry.body} /></TimelineContent>}
-      </TimelineHeader>
-    </TimelineItem>
-  );
-}
 
 
 type NormalizedHistory = ReturnType<typeof normalizeHistory>;

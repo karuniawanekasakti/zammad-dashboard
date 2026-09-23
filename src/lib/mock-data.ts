@@ -420,6 +420,21 @@ export function historyForTicket(ticketId: string): TicketHistory[] {
       from: "normal",
       to: ticket.priority,
     },
+    ...([
+      ["sla_start", 2, "First response"],
+      ["sla_pause", 20, "First response"],
+      ["sla_resume", 35, "First response"],
+      ["sla_warning", 50, "First response"],
+      ["sla_critical", 65, "First response"],
+      ["sla_breach", 80, "First response"],
+      ["sla_milestone_complete", 95, "Resolution"],
+    ] as const).map(([type, minutes, title]) => ({
+      id: `${ticket.id}-${type}`,
+      type,
+      title,
+      created_by: "System",
+      created_at: new Date(base + minutes * 60 * 1000).toISOString(),
+    })),
     ...articlesForTicket(ticketId).map((article) => ({
       id: `${article.id}-history`,
       type: article.type,

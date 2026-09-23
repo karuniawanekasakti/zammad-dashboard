@@ -11,6 +11,7 @@
     "check:sla": "node --experimental-strip-types check_sla_deadline.ts",
     "check:sla-progress": "node --experimental-strip-types check_sla_progress.ts",
     "check:history": "node --experimental-strip-types check_ticket_history.ts",
+    "check:sla-timeline": "node --experimental-strip-types check_sla_timeline.ts",
     "check:overview": "node --experimental-strip-types check_overview_severity.ts",
     "preview": "vite preview"
   },

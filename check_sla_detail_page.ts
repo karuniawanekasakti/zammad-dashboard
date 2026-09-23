@@ -14,7 +14,6 @@ try {
   const { default: SlaDetailPage } = await vite.ssrLoadModule("/src/pages/sla-detail.tsx") as typeof import("./src/pages/sla-detail.tsx");
   const { mergeEventsAndArticles } = await vite.ssrLoadModule("/src/lib/sla-timeline.ts") as typeof import("./src/lib/sla-timeline.ts");
   const { SlaProgressBar } = await vite.ssrLoadModule("/src/components/milestone-progress-bar.tsx") as typeof import("./src/components/milestone-progress-bar.tsx");
-  const { ManagerMetricsSummary } = await vite.ssrLoadModule("/src/components/sla/manager-metrics-summary.tsx") as typeof import("./src/components/sla/manager-metrics-summary.tsx");
   const { VirtualizedArticleList } = await vite.ssrLoadModule("/src/components/tickets/virtualized-article-list.tsx") as typeof import("./src/components/tickets/virtualized-article-list.tsx");
   const { ARTICLE_PAGE_SIZE } = await vite.ssrLoadModule("/src/lib/article-pagination.ts") as typeof import("./src/lib/article-pagination.ts");
 
@@ -39,19 +38,6 @@ try {
   const empty = renderToStaticMarkup(createElement(VirtualizedArticleList, { articles: [], total: 0, hasMore: false, loadingMore: false, onLoadMore: () => undefined, renderArticle: () => null }));
   assert.match(empty, /No articles found for this ticket/);
 
-  let seed = 45;
-  const random = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32);
-  for (let index = 0; index < 20; index++) {
-    const compliance = Math.round(random() * 1000) / 10;
-    const breaches = Math.floor(random() * 20);
-    const average = Math.floor(random() * 600);
-    const monitor = buildMockSlaMonitor(liveTickets(new Date("2026-09-08T12:00:00Z")), new Date("2026-09-08T12:00:00Z"));
-    monitor.manager_metrics!.month = { compliance_rate: compliance, active_breaches: breaches, trend_percentage: 0, average_breach_time_minutes: average };
-    const markup = renderToStaticMarkup(createElement(ManagerMetricsSummary, { monitor, scope: "admin" }));
-    assert.match(markup, new RegExp(`${compliance.toFixed(1)}%`));
-    assert.match(markup, new RegExp(`>${breaches}<`));
-    assert.match(markup, new RegExp(average < 60 ? `${average}m` : `${Math.floor(average / 60)}h`));
-  }
 
   const ticket = liveTickets(new Date("2026-09-08T12:00:00Z"))[0];
   const progress = renderToStaticMarkup(createElement(SlaProgressBar, { label: "Resolution", history, deadline: new Date("2026-01-02T09:00:00Z"), now: new Date("2026-01-01T13:00:00Z"), status: "warning", progressPct: 50, ticketCreated: new Date("2026-01-01T09:00:00Z") }));
@@ -66,9 +52,8 @@ try {
   const scope = { role: "agent", group_ids: [], user_id: "" } as const;
   queryClient.setQueryData(["sla", "monitor", scope], monitor);
   const detail = renderToStaticMarkup(createElement(QueryClientProvider, { client: queryClient }, createElement(MemoryRouter, null, createElement(SlaDetailPage, { isInline: true, ticketId: ticket.id }))));
-  assert.match(detail, /SLA verdicts are unavailable/);
-  assert.match(detail, /Status<\/span><span[^>]*>unavailable/);
-  assert.match(detail, /Remaining<\/span><span[^>]*>Unavailable/);
+  assert.match(detail, /SLA verdict unavailable/);
+  assert.match(detail, /Current status and explanation will return after a successful synchronization/);
 
   // Both milestones render independently, and a stale dataset exposes no
   // computed verdict on either bar: the bars degrade to "Unmonitored" rather
@@ -80,11 +65,16 @@ try {
   assert.doesNotMatch(detail, /First Response: \d+%/);
   assert.doesNotMatch(detail, /Resolution: \d+%/);
 
-  const split = renderToStaticMarkup(createElement(QueryClientProvider, { client: queryClient }, createElement(MemoryRouter, null, createElement(SlaDetailPage, { ticketId: ticket.id }))));
-  assert.match(split, /SLA Detail · #/);
-  assert.match(split, />SLA Events Only</);
-  assert.match(split, />Full History</);
-  assert.match(split, /Conversation/);
+  const standalone = renderToStaticMarkup(createElement(QueryClientProvider, { client: queryClient }, createElement(MemoryRouter, null, createElement(SlaDetailPage, { ticketId: ticket.id }))));
+  assert.match(standalone, /Overall SLA status/);
+  assert.match(standalone, /Ticket context/);
+  assert.match(standalone, /Milestone performance/);
+  assert.match(standalone, /SLA timeline/);
+  assert.match(standalone, /Calculation details/);
+  assert.match(standalone, /Relevant SLA configuration/);
+  assert.match(standalone, /Events and ticket history/);
+  assert.doesNotMatch(standalone, />Detail<|>Dashboard</);
+  assert.doesNotMatch(standalone, /Compliance Rate|Active Breaches/);
 } finally {
   await vite.close();
 }

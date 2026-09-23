@@ -37,8 +37,10 @@ try {
     createElement(MemoryRouter, null, createElement(SlaDetailPage, { isInline: true, ticketId: id })),
   ));
   console.error = originalError;
-  assert.match(markup, new RegExp(`SLA Detail · #${ticket.ticket.number}`));
-  assert.match(markup, /Remaining/);
+  assert.match(markup, /Overall SLA status/);
+  assert.match(markup, /Ticket context/);
+  assert.match(markup, new RegExp(ticket.ticket.customer_name));
+  assert.match(markup, /Milestone performance/);
   assert.doesNotMatch(markup, /Ticket not found/);
 } finally {
   await vite.close();

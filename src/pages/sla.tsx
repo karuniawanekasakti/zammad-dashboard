@@ -61,8 +61,9 @@ export default function SlaPage() {
   const data = monitor.data;
   const tableRows = data?.tickets ?? [];
   const zammadBase = (config.data?.zammad_base_url ?? FALLBACK_ZAMMAD_BASE).replace(/\/$/, "");
-  const { index: groupPageIndex, pageCount: groupPageCount, start: groupPageStart } = slaGroupPage(data?.sla_rows.length ?? 0, navigation.page);
-  const groupRows = data?.sla_rows.slice(groupPageStart, groupPageStart + SLA_GROUP_PAGE_SIZE) ?? [];
+  const sortedGroupRows = [...(data?.sla_rows ?? [])].sort((a, b) => b.total - a.total);
+  const { index: groupPageIndex, pageCount: groupPageCount, start: groupPageStart } = slaGroupPage(sortedGroupRows.length, navigation.page);
+  const groupRows = sortedGroupRows.slice(groupPageStart, groupPageStart + SLA_GROUP_PAGE_SIZE);
   // A live verdict is only as trustworthy as the row it describes. When the
   // dataset is not Up to Date the page must not present stale figures as
   // current — "no breaches" and "no data" are different answers. A response with

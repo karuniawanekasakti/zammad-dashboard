@@ -607,7 +607,7 @@ export let alertRules: AlertRule[] = [
   },
   {
     id: uuid("rule", 2),
-    name: "High priority open > 24h",
+    name: "Tickets open > 24h",
     scope_type: "global",
     scope_id: null,
     scope_label: "All groups",

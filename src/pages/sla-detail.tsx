@@ -10,7 +10,7 @@ import { useScope } from "@/stores/auth";
 import { MilestoneProgressBar } from "@/components/milestone-progress-bar";
 import { VirtualizedArticleList, appendArticlePage } from "@/components/tickets/virtualized-article-list";
 import { PageLoader } from "@/components/spinner";
-import { PriorityBadge, StateBadge } from "@/components/status-badges";
+import { SeverityBadge, StateBadge } from "@/components/status-badges";
 import { SlaBadge } from "@/components/sla-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -129,7 +129,7 @@ export default function SlaDetailPage({ isInline = false, ticketId }: SlaDetailP
     {!verdictsAvailable && <Card className="border-amber-500/50 bg-amber-500/5"><CardContent className="flex gap-3 py-4 text-sm"><AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-600" /><div><p className="font-medium">SLA verdict unavailable</p><p className="text-muted-foreground">The synchronized dataset is not up to date, so this page will not present a stale verdict as current.</p></div></CardContent></Card>}
 
     {!isInline && <div className="flex flex-col gap-4 border-b pb-6 sm:flex-row sm:items-start sm:justify-between">
-      <div className="space-y-3"><Button asChild variant="ghost" size="sm" className="-ml-3"><Link to={`/tickets/${row.id}`}><ArrowLeft /> Back to ticket</Link></Button><div><div className="mb-2 flex flex-wrap items-center gap-2"><span className="font-mono text-sm text-muted-foreground">#{row.number}</span><StateBadge state={row.state} /><PriorityBadge priority={row.priority} /></div><h1 className="text-2xl font-bold tracking-tight">{row.title}</h1><p className="mt-1 text-sm text-muted-foreground">SLA lifecycle and investigation detail</p></div></div>
+      <div className="space-y-3"><Button asChild variant="ghost" size="sm" className="-ml-3"><Link to={`/tickets/${row.id}`}><ArrowLeft /> Back to ticket</Link></Button><div><div className="mb-2 flex flex-wrap items-center gap-2"><span className="font-mono text-sm text-muted-foreground">#{row.number}</span><StateBadge state={row.state} /><SeverityBadge severity={row.severity} label={row.severity_label} /></div><h1 className="text-2xl font-bold tracking-tight">{row.title}</h1><p className="mt-1 text-sm text-muted-foreground">SLA lifecycle and investigation detail</p></div></div>
       {zammadBase && <Button asChild variant="outline"><a href={`${zammadBase}/#ticket/zoom/${row.zammad_id}`} target="_blank" rel="noreferrer">Open in Zammad <ExternalLink /></a></Button>}
     </div>}
 

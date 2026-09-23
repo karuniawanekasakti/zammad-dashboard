@@ -38,13 +38,14 @@ import { fullName } from "@/lib/mock-data";
 import { KpiCard } from "@/components/kpi-card";
 import { ChartCard } from "@/components/chart-card";
 import { PageHeader } from "@/components/page-header";
-import { RoleBadge, StateBadge, PriorityBadge } from "@/components/status-badges";
+import { RoleBadge, SeverityBadge, StateBadge } from "@/components/status-badges";
 import { SlaBadge } from "@/components/sla-badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { UserAvatar } from "@/components/user-avatar";
 import { formatPercent, formatSeconds, formatNumber } from "@/lib/utils";
+import { SEVERITY_OPTIONS } from "@/lib/ticket-fields";
 import {
   Select,
   SelectContent,
@@ -412,14 +413,13 @@ function ProjectManagerDashboard({ scope, agentFilter, chart }: { scope: ReturnT
     return Array.from(map.entries()).map(([name, value]) => ({ name, value }));
   })();
 
-  const byPriority = (() => {
+  const bySeverity = (() => {
     const rows = tickets.data?.rows ?? [];
-    const groups = ["low", "normal", "high", "very high"] as const;
-    return groups.map((p) => ({
-      name: p,
-      new: rows.filter((t) => t.priority === p && t.state === "new").length,
-      open: rows.filter((t) => t.priority === p && t.state === "open").length,
-      pending: rows.filter((t) => t.priority === p && t.state === "pending").length,
+    return SEVERITY_OPTIONS.map((severity) => ({
+      name: severity.label,
+      new: rows.filter((t) => t.severity === severity.value && t.state === "new").length,
+      open: rows.filter((t) => t.severity === severity.value && t.state === "open").length,
+      pending: rows.filter((t) => t.severity === severity.value && t.state === "pending").length,
     }));
   })();
 
@@ -474,9 +474,9 @@ function ProjectManagerDashboard({ scope, agentFilter, chart }: { scope: ReturnT
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <ChartCard title="Priority distribution" description="Active tickets by priority">
+        <ChartCard title="Severity distribution" description="Active tickets by severity">
           <ResponsiveContainer width="100%" height={260}>
-            <BarChart data={byPriority}>
+            <BarChart data={bySeverity}>
               <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
               <XAxis dataKey="name" tick={{ fontSize: 11 }} />
               <YAxis tick={{ fontSize: 11 }} />
@@ -567,7 +567,7 @@ function TicketCountChart({ scope, groupFilter, agentFilter }: { scope: ReturnTy
                 <span className="block truncate font-medium">{ticket.title}</span>
               </span>
               <span className="hidden shrink-0 items-center gap-2 md:flex">
-                <PriorityBadge priority={ticket.priority} />
+                <SeverityBadge severity={ticket.severity} label={ticket.severity_label} />
                 <StateBadge state={ticket.state} />
                 <span className="text-xs text-muted-foreground">
                   {formatDistanceToNow(new Date(ticket.zammad_updated_at), { addSuffix: true })}
@@ -617,7 +617,7 @@ function AgentDashboard({ scope, userId, chart }: { scope: ReturnType<typeof use
               <TableRow>
                 <TableHead>#</TableHead>
                 <TableHead>Title</TableHead>
-                <TableHead>Priority</TableHead>
+                <TableHead>Severity</TableHead>
                 <TableHead>SLA</TableHead>
                 <TableHead>State</TableHead>
                 <TableHead>Updated</TableHead>
@@ -632,7 +632,7 @@ function AgentDashboard({ scope, userId, chart }: { scope: ReturnType<typeof use
                 >
                   <TableCell className="font-mono">#{t.number}</TableCell>
                   <TableCell className="max-w-xs truncate">{t.title}</TableCell>
-                  <TableCell><PriorityBadge priority={t.priority} /></TableCell>
+                  <TableCell><SeverityBadge severity={t.severity} label={t.severity_label} /></TableCell>
                   <TableCell><SlaBadge status={t.live_sla_status} remainingMs={t.sla_remaining_ms} /></TableCell>
                   <TableCell><StateBadge state={t.state} /></TableCell>
                   <TableCell className="text-xs text-muted-foreground">

@@ -21,7 +21,7 @@ import {
   TimelineSeparator,
   TimelineTitle,
 } from "@/components/reui/timeline";
-import { PriorityBadge, StateBadge } from "@/components/status-badges";
+import { SeverityBadge, StateBadge } from "@/components/status-badges";
 import { SlaBadge } from "@/components/sla-badge";
 import { InlineSlaPanel } from "@/components/sla/inline-sla-panel";
 import { MilestoneProgressBar } from "@/components/milestone-progress-bar";
@@ -186,7 +186,7 @@ export default function TicketDetailPage() {
         description={
           <span className="flex items-center gap-2 text-sm flex-wrap">
             <StateBadge state={ticket.state} />
-            <PriorityBadge priority={ticket.priority} />
+            <SeverityBadge severity={ticket.severity} label={ticket.severity_label} />
             <SlaBadge
               status={ticket.live_sla_status}
               remainingMs={ticket.sla_remaining_ms}
@@ -713,7 +713,7 @@ const ATTRIBUTE_LABELS: Record<string, string> = {
   close_in_min: "close_in_min",
   close_diff_in_min: "close_diff_in_min",
   owner: "Owner",
-  priority: "Priority",
+  priority: "Classification",
 };
 
 function normalizeHistory(row: TicketHistory, index: number) {

@@ -216,7 +216,7 @@ export default function AlertsPage() {
           <div className="space-y-4">
             <div className="space-y-2">
               <Label>Name</Label>
-              <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="High priority breach alert" />
+              <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="High severity breach alert" />
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">

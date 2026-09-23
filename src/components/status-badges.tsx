@@ -1,6 +1,6 @@
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import type { Role, TicketPriority, TicketState } from "@/types";
+import type { Role, TicketState } from "@/types";
 
 const STATE_MAP: Record<TicketState, { label: string; className: string }> = {
   new: { label: "New", className: "bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/30" },
@@ -19,25 +19,6 @@ export function StateBadge({ state, className }: { state: TicketState; className
   );
 }
 
-const PRIORITY_MAP: Record<TicketPriority, { label: string; className: string }> = {
-  low: { label: "Low", className: "bg-muted text-muted-foreground" },
-  normal: { label: "Normal", className: "bg-sky-500/15 text-sky-700 dark:text-sky-300 border-sky-500/30" },
-  high: { label: "High", className: "bg-orange-500/15 text-orange-700 dark:text-orange-400 border-orange-500/30" },
-  "very high": {
-    label: "Very High",
-    className: "bg-red-500/15 text-red-700 dark:text-red-400 border-red-500/30",
-  },
-  unknown: { label: "Unknown", className: "bg-muted text-muted-foreground" },
-};
-
-export function PriorityBadge({ priority, className }: { priority: TicketPriority; className?: string }) {
-  const m = PRIORITY_MAP[priority] ?? { label: String(priority || "Unknown"), className: "bg-muted text-muted-foreground" };
-  return (
-    <Badge variant="outline" className={cn("font-medium", m.className, className)}>
-      {m.label}
-    </Badge>
-  );
-}
 
 const SEVERITY_CLASS: Record<string, string> = {
   p01: "bg-red-500/15 text-red-700 dark:text-red-400 border-red-500/30",

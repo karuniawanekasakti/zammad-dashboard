@@ -23,7 +23,7 @@ import type { ExportFormat, ExportType } from "@/types";
 const REPORT_TYPES: { value: ExportType; label: string; description: string }[] = [
   { value: "agent_performance", label: "Agent Performance", description: "Per-agent KPI breakdown" },
   { value: "sla_summary", label: "SLA Summary", description: "Breached / at-risk ticket list" },
-  { value: "ticket_volume", label: "Ticket Volume", description: "Daily volume by priority" },
+  { value: "ticket_volume", label: "Ticket Volume", description: "Daily volume by severity" },
   { value: "group_stats", label: "Group Statistics", description: "Group-level KPIs and trends" },
 ];
 

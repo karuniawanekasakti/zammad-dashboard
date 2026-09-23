@@ -11,7 +11,7 @@ const vite = await createServer({ server: { middlewareMode: true }, appType: "cu
 try {
   const { buildMockSlaMonitor } = await vite.ssrLoadModule("/src/lib/api.ts") as typeof import("./src/lib/api.ts");
   const { liveTickets } = await vite.ssrLoadModule("/src/lib/mock-data.ts") as typeof import("./src/lib/mock-data.ts");
-  const { SlaDetailRoute } = await vite.ssrLoadModule("/src/pages/sla-detail.tsx") as typeof import("./src/pages/sla-detail.tsx");
+  const { default: SlaDetailPage } = await vite.ssrLoadModule("/src/pages/sla-detail.tsx") as typeof import("./src/pages/sla-detail.tsx");
   const { mergeEventsAndArticles } = await vite.ssrLoadModule("/src/lib/sla-timeline.ts") as typeof import("./src/lib/sla-timeline.ts");
   const { SlaProgressBar } = await vite.ssrLoadModule("/src/components/milestone-progress-bar.tsx") as typeof import("./src/components/milestone-progress-bar.tsx");
   const { ManagerMetricsSummary } = await vite.ssrLoadModule("/src/components/sla/manager-metrics-summary.tsx") as typeof import("./src/components/sla/manager-metrics-summary.tsx");
@@ -65,10 +65,26 @@ try {
   queryClient.setQueryData(["ticket-history", ticket.id], []);
   const scope = { role: "agent", group_ids: [], user_id: "" } as const;
   queryClient.setQueryData(["sla", "monitor", scope], monitor);
-  const detail = renderToStaticMarkup(createElement(QueryClientProvider, { client: queryClient }, createElement(MemoryRouter, null, createElement(SlaDetailRoute, { isInline: true, ticketId: ticket.id }))));
+  const detail = renderToStaticMarkup(createElement(QueryClientProvider, { client: queryClient }, createElement(MemoryRouter, null, createElement(SlaDetailPage, { isInline: true, ticketId: ticket.id }))));
   assert.match(detail, /SLA verdicts are unavailable/);
   assert.match(detail, /Status<\/span><span[^>]*>unavailable/);
   assert.match(detail, /Remaining<\/span><span[^>]*>Unavailable/);
+
+  // Both milestones render independently, and a stale dataset exposes no
+  // computed verdict on either bar: the bars degrade to "Unmonitored" rather
+  // than reporting a percentage the sync cannot vouch for.
+  assert.match(detail, /First Response SLA progress/);
+  assert.match(detail, /Resolution SLA progress/);
+  assert.match(detail, /First Response: Unmonitored/);
+  assert.match(detail, /Resolution: Unmonitored/);
+  assert.doesNotMatch(detail, /First Response: \d+%/);
+  assert.doesNotMatch(detail, /Resolution: \d+%/);
+
+  const split = renderToStaticMarkup(createElement(QueryClientProvider, { client: queryClient }, createElement(MemoryRouter, null, createElement(SlaDetailPage, { ticketId: ticket.id }))));
+  assert.match(split, /SLA Detail · #/);
+  assert.match(split, />SLA Events Only</);
+  assert.match(split, />Full History</);
+  assert.match(split, /Conversation/);
 } finally {
   await vite.close();
 }

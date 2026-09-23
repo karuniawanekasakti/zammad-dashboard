@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type PointerEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent, type ReactNode } from "react";
 import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -6,6 +6,38 @@ export const INLINE_SLA_PANEL_MIN_WIDTH = 320;
 export const INLINE_SLA_PANEL_MAX_WIDTH = 960;
 export const INLINE_SLA_PANEL_DEFAULT_WIDTH = 480;
 const INLINE_SLA_PANEL_KEYBOARD_STEP = 24;
+
+// Everything inside the panel that can take focus. The trap has to know its
+// own boundary set, so it is derived from the DOM rather than hard-coded.
+const FOCUSABLE_SELECTOR = [
+  "a[href]",
+  "button:not([disabled])",
+  "input:not([disabled])",
+  "select:not([disabled])",
+  "textarea:not([disabled])",
+  '[tabindex]:not([tabindex="-1"])',
+].join(",");
+
+export interface FocusableLike {
+  focus: () => void;
+}
+
+// A modal panel must swallow Tab at its edges: the browser would otherwise
+// move focus to whatever sits behind the overlay. Returns the element to pull
+// focus back to, or null when the browser's own move already stays inside.
+export function containFocus<T extends FocusableLike>(
+  elements: T[],
+  active: T | null,
+  shiftKey: boolean,
+): T | null {
+  if (elements.length === 0) return null;
+  const index = active ? elements.indexOf(active) : -1;
+  if (index === -1) return shiftKey ? elements[elements.length - 1] : elements[0];
+  const next = shiftKey ? index - 1 : index + 1;
+  if (next < 0) return elements[elements.length - 1];
+  if (next >= elements.length) return elements[0];
+  return null;
+}
 
 export function clampInlineSlaPanelWidth(width: number) {
   return Math.min(INLINE_SLA_PANEL_MAX_WIDTH, Math.max(INLINE_SLA_PANEL_MIN_WIDTH, Math.round(width)));
@@ -34,9 +66,26 @@ export function InlineSlaPanel({ children, onClose }: InlineSlaPanelProps) {
   const [width, setWidth] = useState(INLINE_SLA_PANEL_DEFAULT_WIDTH);
   const previousFocus = useRef<HTMLElement | null>(null);
   const backButton = useRef<HTMLButtonElement | null>(null);
+  const panel = useRef<HTMLElement | null>(null);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
   const close = useMemo(() => createSingleFire(() => onCloseRef.current()), []);
+
+  // Tab and Shift+Tab cycle within the panel; without this, focus walks out
+  // of the modal into the page behind the overlay.
+  const handleTab = (event: ReactKeyboardEvent<HTMLElement>) => {
+    if (event.key !== "Tab") return;
+    const root = panel.current;
+    if (!root) return;
+    const focusable = Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter(
+      (element) => element.tabIndex !== -1,
+    );
+    const target = containFocus(focusable, document.activeElement as HTMLElement | null, event.shiftKey);
+    if (target) {
+      event.preventDefault();
+      target.focus();
+    }
+  };
 
   useEffect(() => {
     previousFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -76,6 +125,8 @@ export function InlineSlaPanel({ children, onClose }: InlineSlaPanelProps) {
   return (
     <div className="fixed inset-0 z-50 bg-black/30" onClick={close}>
       <section
+        ref={panel}
+        onKeyDown={handleTab}
         id="sla-detail-inline-panel"
         role="dialog"
         aria-modal="true"

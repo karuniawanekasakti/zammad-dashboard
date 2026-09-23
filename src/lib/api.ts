@@ -737,10 +737,9 @@ const mockApi = {
 
 export { fullName };
 
-// --- Backend integration switch ---
-// Set VITE_USE_MOCK=true only for offline/demo mode.
+// Use the real API only when explicitly enabled; local/offline development defaults to mock data.
 import { apiClient } from "@/lib/api-client";
 
-const useMock = import.meta.env.VITE_USE_MOCK === "true";
+const useMock = import.meta.env.VITE_USE_BACKEND !== "true" || import.meta.env.VITE_USE_MOCK === "true";
 
 export const api = useMock ? mockApi : (apiClient as unknown as typeof mockApi);

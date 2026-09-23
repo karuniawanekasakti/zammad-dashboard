@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { ChevronDown, ChevronRight, Users } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -180,8 +180,19 @@ function StatCard({ title, value, className }: { title: string; value: number; c
   );
 }
 
+// The /sla dashboard keeps its whole filter context (group, priority, period,
+// page, breaches) in the search string, so opening a ticket must carry that
+// string onto the detail route or the manager loses the view they came from.
+export function slaTicketDetailHref(ticketId: string, search: string) {
+  return `/sla/detail/${ticketId}${search}`;
+}
+
 function TicketTable({ rows }: { rows: SlaMonitorTicket[] }) {
   const navigate = useNavigate();
+  // The open helper and the exported href builder share one definition, so the
+  // check below can assert the exact URL a click or Enter would navigate to.
+  const { search } = useLocation();
+  const openTicket = (ticketId: string) => navigate(slaTicketDetailHref(ticketId, search));
   return (
     <Table>
       <TableHeader>
@@ -202,9 +213,9 @@ function TicketTable({ rows }: { rows: SlaMonitorTicket[] }) {
               role="link"
               tabIndex={0}
               className="cursor-pointer"
-              onClick={() => navigate(`/sla/detail/${ticket.id}`)}
+              onClick={() => openTicket(ticket.id)}
               onKeyDown={(event) => {
-                if (event.key === "Enter") navigate(`/sla/detail/${ticket.id}`);
+                if (event.key === "Enter") openTicket(ticket.id);
               }}
             >
               <TableCell className="font-mono text-xs">

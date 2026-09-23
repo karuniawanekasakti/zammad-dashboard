@@ -3,7 +3,8 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
 import { createServer } from "vite";
-import type { SlaMonitorData, SlaMonitorTicket } from "./src/types/index.ts";
+import type { SlaMonitorData, SlaMonitorTicket, Ticket } from "./src/types/index.ts";
+import type * as SlaPageModule from "./src/pages/sla.tsx";
 
 // Issue #42. A manager opening the SLA detail page sees a metrics header
 // (compliance rate, active breaches, trend vs the previous period, average
@@ -84,6 +85,7 @@ const vite = await createServer({ server: { middlewareMode: true }, appType: "cu
 try {
   const { ManagerMetricsSummary } = await vite.ssrLoadModule("/src/components/sla/manager-metrics-summary.tsx") as typeof import("./src/components/sla/manager-metrics-summary.tsx");
   const { SlaDashboardList } = await vite.ssrLoadModule("/src/components/sla/sla-dashboard-list.tsx") as typeof import("./src/components/sla/sla-dashboard-list.tsx");
+  const { severityMonitorRows } = await vite.ssrLoadModule("/src/pages/sla.tsx") as typeof SlaPageModule;
 
   // --- Manager metrics header ------------------------------------------------
   const header = markupFor(createElement(ManagerMetricsSummary, { monitor, scope: null }));
@@ -126,6 +128,17 @@ try {
   // numbers the manager reads, which is the whole point of the selector.
   const year = markupFor(createElement(ManagerMetricsSummary, { monitor, scope: null, period: "year" }));
   assert.match(year, /71\.0%/);
+
+  // --- Severity ordering -----------------------------------------------------
+  const severityRows = severityMonitorRows([
+    { severity: "p01" },
+    { severity: "p02" },
+    { severity: "p02" },
+    { severity: "p03" },
+    { severity: "p03" },
+    { severity: "p03" },
+  ] as Ticket[]);
+  assert.deepEqual(severityRows.slice(0, 3).map((row) => [row.id, row.total]), [["p03", 3], ["p02", 2], ["p01", 1]], "severity rows must be ordered by ticket count descending");
 
   // --- Urgency ordering ------------------------------------------------------
   const list = markupFor(createElement(SlaDashboardList, { tickets, scope: null }));

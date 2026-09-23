@@ -62,7 +62,7 @@ export default function SlaPage() {
   const data = monitor.data;
   const tableRows = data?.tickets ?? [];
   const zammadBase = (config.data?.zammad_base_url ?? FALLBACK_ZAMMAD_BASE).replace(/\/$/, "");
-  const severityRows = SEVERITY_OPTIONS.map((severity) => slaMonitorRow(severity.value, severity.label, tableRows.filter((ticket) => ticket.severity === severity.value)));
+  const severityRows = severityMonitorRows(tableRows);
   const sortedGroupRows = [...(data?.sla_rows ?? [])].sort((a, b) => b.total - a.total);
   const { index: groupPageIndex, pageCount: groupPageCount, start: groupPageStart } = slaGroupPage(sortedGroupRows.length, navigation.page);
   const groupRows = sortedGroupRows.slice(groupPageStart, groupPageStart + SLA_GROUP_PAGE_SIZE);
@@ -261,6 +261,12 @@ function BreachLogRow({ ticket, zammadBase }: { ticket: Ticket; zammadBase: stri
     </TableRow>
   );
 }
+export function severityMonitorRows(tickets: Ticket[]): SlaMonitorRow[] {
+  return SEVERITY_OPTIONS
+    .map((severity) => slaMonitorRow(severity.value, severity.label, tickets.filter((ticket) => ticket.severity === severity.value)))
+    .sort((a, b) => b.total - a.total);
+}
+
 function slaMonitorRow(id: string, name: string, tickets: Ticket[]): SlaMonitorRow {
   const monitored = tickets.filter((ticket) => ticket.live_sla_status !== "no_sla");
   const breached = monitored.filter((ticket) => ticket.live_sla_status === "breached").length;

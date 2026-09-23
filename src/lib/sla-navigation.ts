@@ -8,6 +8,7 @@ export interface SlaNavigationState {
   priority: Ticket["priority"] | "all";
   period: ManagerMetricsPeriod;
   page: number;
+  severityPage: number;
   showAllBreaches: boolean;
 }
 
@@ -16,6 +17,7 @@ export const DEFAULT_SLA_NAVIGATION: SlaNavigationState = {
   priority: "all",
   period: "month",
   page: 0,
+  severityPage: 0,
   showAllBreaches: false,
 };
 
@@ -23,11 +25,13 @@ export function parseSlaNavigation(params: URLSearchParams): SlaNavigationState 
   const priority = params.get("priority");
   const period = params.get("period");
   const page = Number(params.get("page"));
+  const severityPage = Number(params.get("severityPage"));
   return {
     group: params.get("group") || DEFAULT_SLA_NAVIGATION.group,
     priority: priority && PRIORITIES[priority] ? priority as Ticket["priority"] : DEFAULT_SLA_NAVIGATION.priority,
     period: period && PERIODS[period] ? period as ManagerMetricsPeriod : DEFAULT_SLA_NAVIGATION.period,
     page: Number.isInteger(page) && page > 0 ? page : DEFAULT_SLA_NAVIGATION.page,
+    severityPage: Number.isInteger(severityPage) && severityPage > 0 ? severityPage : DEFAULT_SLA_NAVIGATION.severityPage,
     showAllBreaches: params.get("breaches") === "all",
   };
 }
@@ -38,6 +42,7 @@ export function serializeSlaNavigation(state: SlaNavigationState): URLSearchPara
   if (state.priority !== DEFAULT_SLA_NAVIGATION.priority) params.set("priority", state.priority);
   if (state.period !== DEFAULT_SLA_NAVIGATION.period) params.set("period", state.period);
   if (state.page !== DEFAULT_SLA_NAVIGATION.page) params.set("page", String(state.page));
+  if (state.severityPage !== DEFAULT_SLA_NAVIGATION.severityPage) params.set("severityPage", String(state.severityPage));
   if (state.showAllBreaches) params.set("breaches", "all");
   return params;
 }

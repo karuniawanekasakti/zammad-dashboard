@@ -22,12 +22,12 @@ import { ManagerMetricsSummary } from "@/components/sla/manager-metrics-summary"
 import { SlaDashboardList } from "@/components/sla/sla-dashboard-list";
 
 
-const SLA_GROUP_PAGE_SIZE = 5;
+const SLA_STATUS_PAGE_SIZE = 5;
 
-export function slaGroupPage(rowCount: number, pageIndex: number) {
-  const pageCount = Math.max(1, Math.ceil(rowCount / SLA_GROUP_PAGE_SIZE));
+export function slaStatusPage(rowCount: number, pageIndex: number) {
+  const pageCount = Math.max(1, Math.ceil(rowCount / SLA_STATUS_PAGE_SIZE));
   const index = Math.min(Math.max(pageIndex, 0), pageCount - 1);
-  return { index, pageCount, start: index * SLA_GROUP_PAGE_SIZE };
+  return { index, pageCount, start: index * SLA_STATUS_PAGE_SIZE };
 }
 
 const FALLBACK_ZAMMAD_BASE = (import.meta.env.VITE_ZAMMAD_BASE_URL ?? "").replace(/\/$/, "");
@@ -63,9 +63,11 @@ export default function SlaPage() {
   const tableRows = data?.tickets ?? [];
   const zammadBase = (config.data?.zammad_base_url ?? FALLBACK_ZAMMAD_BASE).replace(/\/$/, "");
   const severityRows = severityMonitorRows(tableRows);
+  const { index: severityPageIndex, pageCount: severityPageCount, start: severityPageStart } = slaStatusPage(severityRows.length, navigation.severityPage);
+  const pagedSeverityRows = severityRows.slice(severityPageStart, severityPageStart + SLA_STATUS_PAGE_SIZE);
   const sortedGroupRows = [...(data?.sla_rows ?? [])].sort((a, b) => b.total - a.total);
-  const { index: groupPageIndex, pageCount: groupPageCount, start: groupPageStart } = slaGroupPage(sortedGroupRows.length, navigation.page);
-  const groupRows = sortedGroupRows.slice(groupPageStart, groupPageStart + SLA_GROUP_PAGE_SIZE);
+  const { index: groupPageIndex, pageCount: groupPageCount, start: groupPageStart } = slaStatusPage(sortedGroupRows.length, navigation.page);
+  const groupRows = sortedGroupRows.slice(groupPageStart, groupPageStart + SLA_STATUS_PAGE_SIZE);
   // A live verdict is only as trustworthy as the row it describes. When the
   // dataset is not Up to Date the page must not present stale figures as
   // current — "no breaches" and "no data" are different answers. A response with
@@ -136,7 +138,16 @@ export default function SlaPage() {
             <CardDescription>Compliance rate tiket aktif berdasarkan severity.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            {severityRows.map((row) => <ComplianceRow key={row.id} row={row} verdictsAvailable={verdictsAvailable} />)}
+            {pagedSeverityRows.map((row) => <ComplianceRow key={row.id} row={row} verdictsAvailable={verdictsAvailable} />)}
+            {severityPageCount > 1 && (
+              <div className="flex items-center justify-between border-t pt-4 text-sm text-muted-foreground">
+                <span>Page {severityPageIndex + 1} of {severityPageCount}</span>
+                <div className="flex gap-2">
+                  <Button variant="outline" size="sm" onClick={() => setNavigation({ severityPage: severityPageIndex - 1 })} disabled={severityPageIndex === 0}>Previous</Button>
+                  <Button variant="outline" size="sm" onClick={() => setNavigation({ severityPage: severityPageIndex + 1 })} disabled={severityPageIndex === severityPageCount - 1}>Next</Button>
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
         <Card>

@@ -8,6 +8,7 @@ import type * as InlinePanelModule from "./src/components/sla/inline-sla-panel.t
 import type * as SlaBadgeModule from "./src/components/sla-badge.tsx";
 import type * as SlaDashboardListModule from "./src/components/sla/sla-dashboard-list.tsx";
 import type * as SlaNavigationModule from "./src/lib/sla-navigation.ts";
+import type * as SlaPageModule from "./src/pages/sla.tsx";
 import type { SlaMonitorTicket } from "./src/types/index.ts";
 
 // Opening a ticket from the /sla dashboard must not throw away the filters the
@@ -30,6 +31,7 @@ try {
   const { SlaBadge } = await vite.ssrLoadModule("/src/components/sla-badge.tsx") as typeof SlaBadgeModule;
   const { SlaDashboardList, slaTicketDetailHref } = await vite.ssrLoadModule("/src/components/sla/sla-dashboard-list.tsx") as typeof SlaDashboardListModule;
   const { parseSlaNavigation, serializeSlaNavigation } = await vite.ssrLoadModule("/src/lib/sla-navigation.ts") as typeof SlaNavigationModule;
+  const { slaStatusPage } = await vite.ssrLoadModule("/src/pages/sla.tsx") as typeof SlaPageModule;
 
   assert.equal(clampInlineSlaPanelWidth(-1), INLINE_SLA_PANEL_MIN_WIDTH);
   assert.equal(clampInlineSlaPanelWidth(Number.MAX_SAFE_INTEGER), INLINE_SLA_PANEL_MAX_WIDTH);
@@ -88,16 +90,21 @@ try {
   assert.match(trigger, /aria-controls="sla-detail-inline-panel"/);
   assert.match(trigger, /aria-haspopup="dialog"/);
 
+  assert.deepEqual(slaStatusPage(7, 0), { index: 0, pageCount: 2, start: 0 });
+  assert.deepEqual(slaStatusPage(7, 1), { index: 1, pageCount: 2, start: 5 });
+  assert.deepEqual(slaStatusPage(7, 99), { index: 1, pageCount: 2, start: 5 }, "an out-of-range severity page must clamp to the last page");
+
   // --- Dashboard query survives row navigation --------------------------------
   const dashboardState = {
     group: "support",
     priority: "high" as const,
     period: "quarter" as const,
     page: 2,
+    severityPage: 1,
     showAllBreaches: true,
   };
   const query = serializeSlaNavigation(dashboardState);
-  assert.equal(query.toString(), "group=support&priority=high&period=quarter&page=2&breaches=all");
+  assert.equal(query.toString(), "group=support&priority=high&period=quarter&page=2&severityPage=1&breaches=all");
   assert.deepEqual(parseSlaNavigation(query), dashboardState, "dashboard query parameters must survive detail navigation and browser Back");
 
   // The dashboard renders its rows in a router whose current URL carries those
@@ -125,6 +132,7 @@ try {
   assert.match(target, /priority=high/);
   assert.match(target, /period=quarter/);
   assert.match(target, /page=2/);
+  assert.match(target, /severityPage=1/);
   assert.match(target, /breaches=all/);
   assert.equal(slaTicketDetailHref(ticket.id, ""), `/sla/detail/${ticket.id}`, "a filterless dashboard still opens the plain detail route");
 

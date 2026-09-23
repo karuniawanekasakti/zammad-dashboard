@@ -109,3 +109,5 @@ function ActivityLegend({ activities }: { activities: SlaActivity[] }) {
     </div>
   );
 }
+
+export const SlaProgressBar = MilestoneProgressBar;

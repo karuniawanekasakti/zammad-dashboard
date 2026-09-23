@@ -17,6 +17,7 @@
     "check:metrics": "node --experimental-strip-types check_sla_manager_metrics.ts",
     "check:sla-navigation": "node --experimental-strip-types check_sla_detail_navigation.ts",
     "check:sla-data-flow": "node --experimental-strip-types check_sla_data_flow.ts",
+    "check:sla-detail": "node --experimental-strip-types check_sla_detail_page.ts",
     "preview": "vite preview"
   },
   "dependencies": {

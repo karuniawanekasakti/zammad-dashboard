@@ -81,3 +81,5 @@ export default function SlaDetailPage({ isInline = false, ticketId }: SlaDetailP
     </Tabs>
   );
 }
+
+export const SlaDetailRoute = SlaDetailPage;

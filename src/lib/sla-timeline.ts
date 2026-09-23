@@ -102,3 +102,5 @@ export function mergeSlaTimeline(history: TicketHistory[], articles: TicketArtic
 
   return events.sort((a, b) => a.timestamp.localeCompare(b.timestamp) || a.id.localeCompare(b.id));
 }
+
+export const mergeEventsAndArticles = mergeSlaTimeline;

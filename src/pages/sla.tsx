@@ -1,10 +1,10 @@
-import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { formatDistanceToNow } from "date-fns";
 import { Bar, BarChart, CartesianGrid, Cell, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { api } from "@/lib/api";
 import { slaVerdictsAvailable } from "@/lib/sla-deadline";
+import { parseSlaNavigation, serializeSlaNavigation, type SlaNavigationState } from "@/lib/sla-navigation";
 import { useScope } from "@/stores/auth";
 import { PageHeader } from "@/components/page-header";
 import { PageLoader } from "@/components/spinner";
@@ -16,7 +16,7 @@ import { PriorityBadge } from "@/components/status-badges";
 import { Button } from "@/components/ui/button";
 import { cn, formatNumber, formatPercent } from "@/lib/utils";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import type { ManagerMetricsPeriod, SlaMonitorData, SlaMonitorRow, Ticket } from "@/types";
+import type { SlaMonitorData, SlaMonitorRow, Ticket } from "@/types";
 import { ManagerMetricsSummary } from "@/components/sla/manager-metrics-summary";
 import { SlaDashboardList } from "@/components/sla/sla-dashboard-list";
 
@@ -47,21 +47,21 @@ const CHART_COLORS = {
 };
 
 export default function SlaPage() {
-  const [groupFilter, setGroupFilter] = useState<string>("all");
-  const [priorityFilter, setPriorityFilter] = useState<Ticket["priority"] | "all">("all");
-  const [metricsPeriod, setMetricsPeriod] = useState<ManagerMetricsPeriod>("month");
-  const [groupPage, setGroupPage] = useState(0);
-  const [showAllBreaches, setShowAllBreaches] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const navigation = parseSlaNavigation(searchParams);
+  const setNavigation = (change: Partial<SlaNavigationState>) => {
+    setSearchParams(serializeSlaNavigation({ ...navigation, ...change }), { replace: true });
+  };
 
   const scope = useScope();
   const config = useQuery({ queryKey: ["system", "public-config"], queryFn: () => api.getPublicConfig() });
   const groups = useQuery({ queryKey: ["groups", "filter", scope], queryFn: () => api.listAllGroupsForFilter() });
-  const monitor = useQuery({ queryKey: ["sla", "monitor", scope, groupFilter, priorityFilter], queryFn: () => api.listSlaMonitor(scope, groupFilter, priorityFilter), refetchInterval: 60_000 });
+  const monitor = useQuery({ queryKey: ["sla", "monitor", scope, navigation.group, navigation.priority], queryFn: () => api.listSlaMonitor(scope, navigation.group, navigation.priority), refetchInterval: 60_000 });
 
   const data = monitor.data;
   const tableRows = data?.tickets ?? [];
   const zammadBase = (config.data?.zammad_base_url ?? FALLBACK_ZAMMAD_BASE).replace(/\/$/, "");
-  const { index: groupPageIndex, pageCount: groupPageCount, start: groupPageStart } = slaGroupPage(data?.sla_rows.length ?? 0, groupPage);
+  const { index: groupPageIndex, pageCount: groupPageCount, start: groupPageStart } = slaGroupPage(data?.sla_rows.length ?? 0, navigation.page);
   const groupRows = data?.sla_rows.slice(groupPageStart, groupPageStart + SLA_GROUP_PAGE_SIZE) ?? [];
   // A live verdict is only as trustworthy as the row it describes. When the
   // dataset is not Up to Date the page must not present stale figures as
@@ -107,7 +107,7 @@ export default function SlaPage() {
       <Card>
         <CardContent className="flex flex-wrap items-center gap-3 py-4">
           <span className="text-sm font-medium">Group</span>
-          <Select value={groupFilter} onValueChange={(value) => { setGroupFilter(value); setGroupPage(0); }}>
+          <Select value={navigation.group} onValueChange={(value) => setNavigation({ group: value, page: 0 })}>
             <SelectTrigger className="w-[220px]"><SelectValue placeholder="All groups" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All groups</SelectItem>
@@ -115,7 +115,7 @@ export default function SlaPage() {
             </SelectContent>
           </Select>
           <span className="text-sm font-medium">Priority</span>
-          <Select value={priorityFilter} onValueChange={(value) => { setPriorityFilter(value as Ticket["priority"] | "all"); setGroupPage(0); }}>
+          <Select value={navigation.priority} onValueChange={(value) => setNavigation({ priority: value as Ticket["priority"] | "all", page: 0 })}>
             <SelectTrigger className="w-[180px]"><SelectValue placeholder="All priorities" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All priorities</SelectItem>
@@ -134,8 +134,8 @@ export default function SlaPage() {
         <ManagerMetricsSummary
           monitor={data}
           scope={scope.role}
-          period={metricsPeriod}
-          onPeriodChange={setMetricsPeriod}
+          period={navigation.period}
+          onPeriodChange={(period) => setNavigation({ period })}
         />
       )}
 
@@ -160,8 +160,8 @@ export default function SlaPage() {
               <div className="flex items-center justify-between border-t pt-4 text-sm text-muted-foreground">
                 <span>Page {groupPageIndex + 1} of {groupPageCount}</span>
                 <div className="flex gap-2">
-                  <Button variant="outline" size="sm" onClick={() => setGroupPage(groupPageIndex - 1)} disabled={groupPageIndex === 0}>Previous</Button>
-                  <Button variant="outline" size="sm" onClick={() => setGroupPage(groupPageIndex + 1)} disabled={groupPageIndex === groupPageCount - 1}>Next</Button>
+                  <Button variant="outline" size="sm" onClick={() => setNavigation({ page: groupPageIndex - 1 })} disabled={groupPageIndex === 0}>Previous</Button>
+                  <Button variant="outline" size="sm" onClick={() => setNavigation({ page: groupPageIndex + 1 })} disabled={groupPageIndex === groupPageCount - 1}>Next</Button>
                 </div>
               </div>
             )}
@@ -210,7 +210,7 @@ export default function SlaPage() {
             <CardTitle className="text-base">Breach Log</CardTitle>
             <CardDescription>Riwayat tiket terminal dengan bukti pelanggaran SLA.</CardDescription>
           </div>
-          {verdictsAvailable && data.breach_log.length > 20 && <Button variant="outline" size="sm" onClick={() => setShowAllBreaches((v) => !v)}>{showAllBreaches ? "Tampilkan 20" : "Lihat semua"}</Button>}
+          {verdictsAvailable && data.breach_log.length > 20 && <Button variant="outline" size="sm" onClick={() => setNavigation({ showAllBreaches: !navigation.showAllBreaches })}>{navigation.showAllBreaches ? "Tampilkan 20" : "Lihat semua"}</Button>}
         </CardHeader>
         <CardContent>
           <div className="overflow-x-auto rounded-md border">
@@ -229,7 +229,7 @@ export default function SlaPage() {
               <TableBody>
                 {!verdictsAvailable && <EmptyRow colSpan={7} text="Breach log unavailable — the dataset is not up to date, so absence of breaches cannot be claimed." />}
                 {verdictsAvailable && data.breach_log.length === 0 && <EmptyRow colSpan={7} text="Belum ada breach log." />}
-                {verdictsAvailable && data.breach_log.slice(0, showAllBreaches ? data.breach_log.length : 20).map((t) => <BreachLogRow key={t.id} ticket={t} zammadBase={zammadBase} />)}
+                {verdictsAvailable && data.breach_log.slice(0, navigation.showAllBreaches ? data.breach_log.length : 20).map((t) => <BreachLogRow key={t.id} ticket={t} zammadBase={zammadBase} />)}
               </TableBody>
             </Table>
           </div>

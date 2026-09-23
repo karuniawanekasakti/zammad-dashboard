@@ -23,6 +23,7 @@ import {
 } from "@/components/reui/timeline";
 import { PriorityBadge, StateBadge } from "@/components/status-badges";
 import { SlaBadge } from "@/components/sla-badge";
+import { InlineSlaPanel } from "@/components/sla/inline-sla-panel";
 import { MilestoneProgressBar } from "@/components/milestone-progress-bar";
 import { slaDeadline, slaProgress, slaStatus } from "@/lib/sla-deadline";
 import { cn, formatSeconds } from "@/lib/utils";
@@ -72,7 +73,7 @@ export default function TicketDetailPage() {
   // the ticket, and each "Load More" appends the next page.
   const [articles, setArticles] = useState<TicketArticle[]>([]);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [showSlaDetail, setShowSlaDetail] = useState(false);
+  const [isOpen, setIsOpen] = useState(false);
   const scrollKey = `ticket:${id}:scroll`;
   const articlesKey = `ticket:${id}:articles`;
 
@@ -180,7 +181,6 @@ export default function TicketDetailPage() {
           </Link>
         </Button>
       </div>
-      <Button variant="outline" size="sm" onClick={() => setShowSlaDetail(true)}>View SLA Detail</Button>
 
       <PageHeader
         title={`#${ticket.number} · ${ticket.title}`}
@@ -188,7 +188,13 @@ export default function TicketDetailPage() {
           <span className="flex items-center gap-2 text-sm flex-wrap">
             <StateBadge state={ticket.state} />
             <PriorityBadge priority={ticket.priority} />
-            <SlaBadge status={ticket.live_sla_status} remainingMs={ticket.sla_remaining_ms} />
+            <SlaBadge
+              status={ticket.live_sla_status}
+              remainingMs={ticket.sla_remaining_ms}
+              onClick={() => setIsOpen(true)}
+              expanded={isOpen}
+              controls="sla-detail-inline-panel"
+            />
             {ticket.reopen_count > 0 && (
               <Badge variant="muted" className="gap-1">
                 <RotateCcw className="size-3" /> Reopened × {ticket.reopen_count}
@@ -198,7 +204,11 @@ export default function TicketDetailPage() {
         }
       />
 
-      {showSlaDetail && <SlaDetailPage isInline onClose={() => setShowSlaDetail(false)} ticketId={ticket.id} />}
+      {isOpen && (
+        <InlineSlaPanel onClose={() => setIsOpen(false)}>
+          <SlaDetailPage isInline ticketId={ticket.id} />
+        </InlineSlaPanel>
+      )}
       {/* The page is the scroll container, so appending a page preserves the
           current offset without replacing or repositioning existing rows. */}
       <div className="grid gap-4 lg:grid-cols-3">

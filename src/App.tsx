@@ -33,7 +33,7 @@ export default function App() {
         <Route path="/groups" element={<RequireAuth roles={["admin", "team_lead", "project_manager"]}><GroupsPage /></RequireAuth>} />
         <Route path="/groups/:id" element={<GroupDetailPage />} />
         <Route path="/sla" element={<RequireAuth roles={["admin", "team_lead", "project_manager"]}><SlaPage /></RequireAuth>} />
-        <Route path="/sla/detail/:id" element={<RequireAuth roles={["admin", "team_lead", "project_manager"]}><SlaDetailPage /></RequireAuth>} />
+        <Route path="/sla/detail/:ticketId" element={<RequireAuth roles={["admin", "team_lead", "project_manager"]}><SlaDetailPage /></RequireAuth>} />
         <Route path="/performance" element={<RequireAuth roles={["admin", "team_lead", "project_manager"]}><PerformancePage /></RequireAuth>} />
         <Route path="/reports" element={<ReportsPage />} />
         <Route path="/alerts" element={<AlertsPage />} />

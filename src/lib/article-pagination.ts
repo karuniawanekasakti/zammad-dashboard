@@ -1,0 +1,2 @@
+export const ARTICLE_PAGE_SIZE = 20;
+export const VIRTUALIZE_ARTICLES_ABOVE = 100;

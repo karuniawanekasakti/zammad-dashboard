@@ -4,6 +4,7 @@ import { ArrowLeft } from "lucide-react";
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { api } from "@/lib/api";
 import { PageLoader } from "@/components/spinner";
+import { DataError, QueryBody } from "@/components/data-error";
 import { Button } from "@/components/ui/button";
 import { ChartCard } from "@/components/chart-card";
 import { KpiCard } from "@/components/kpi-card";
@@ -14,7 +15,7 @@ import { useScope } from "@/stores/auth";
 export default function GroupDetailPage() {
   const { id } = useParams<{ id: string }>();
   const scope = useScope();
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ["group", id],
     queryFn: () => api.getGroup(id!),
     enabled: !!id,
@@ -26,8 +27,17 @@ export default function GroupDetailPage() {
   });
 
   if (isLoading) return <PageLoader />;
+  if (isError) {
+    return (
+      <div className="space-y-6">
+        <Button variant="ghost" size="sm" asChild>
+          <Link to="/groups"><ArrowLeft className="size-4" />Back to groups</Link>
+        </Button>
+        <DataError title="group" detail="GET /groups/:id" onRetry={() => refetch()} variant="page" />
+      </div>
+    );
+  }
   if (!data) return <div className="text-sm text-muted-foreground">Group not found.</div>;
-
   const { group, trend } = data;
 
   return (
@@ -63,19 +73,28 @@ export default function GroupDetailPage() {
       </ChartCard>
 
       <ChartCard title="Latest tickets" description="Most recently updated in this group">
-        <div className="space-y-2">
-          {(tickets.data?.rows ?? []).map((t) => (
-            <Link
-              to={`/tickets/${t.id}`}
-              key={t.id}
-              className="flex items-center gap-3 border rounded-md p-2 text-sm hover:bg-muted/40"
-            >
-              <span className="font-mono text-xs text-muted-foreground w-14">#{t.number}</span>
-              <span className="flex-1 truncate">{t.title}</span>
-              <span className="text-xs text-muted-foreground">{t.owner_name ?? "Unassigned"}</span>
-            </Link>
-          ))}
-        </div>
+        <QueryBody
+          isLoading={tickets.isLoading}
+          isError={tickets.isError}
+          isEmpty={!tickets.data?.rows?.length}
+          onRetry={() => tickets.refetch()}
+          label="latest tickets"
+          emptyMessage="No tickets in this group yet."
+        >
+          <div className="space-y-2">
+            {(tickets.data?.rows ?? []).map((t) => (
+              <Link
+                to={`/tickets/${t.id}`}
+                key={t.id}
+                className="flex items-center gap-3 border rounded-md p-2 text-sm hover:bg-muted/40"
+              >
+                <span className="font-mono text-xs text-muted-foreground w-14">#{t.number}</span>
+                <span className="flex-1 truncate">{t.title}</span>
+                <span className="text-xs text-muted-foreground">{t.owner_name ?? "Unassigned"}</span>
+              </Link>
+            ))}
+          </div>
+        </QueryBody>
       </ChartCard>
     </div>
   );

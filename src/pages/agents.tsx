@@ -5,6 +5,7 @@ import { api } from "@/lib/api";
 import { useScope } from "@/stores/auth";
 import { PageHeader } from "@/components/page-header";
 import { PageLoader } from "@/components/spinner";
+import { DataError } from "@/components/data-error";
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
@@ -18,11 +19,19 @@ export default function AgentsPage() {
   const nav = useNavigate();
   const scope = useScope();
   const [q, setQ] = useState("");
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ["agents", scope],
     queryFn: () => api.listAgents(scope),
   });
   if (isLoading) return <PageLoader />;
+  if (isError) {
+    return (
+      <div className="space-y-4">
+        <PageHeader title="Agents" description="Workload, SLA and KPI overview per agent." />
+        <DataError title="agents" detail="GET /agents" onRetry={() => refetch()} variant="page" />
+      </div>
+    );
+  }
   const filtered = (data ?? []).filter((s) => fullName(s.agent).toLowerCase().includes(q.toLowerCase()));
 
   return (

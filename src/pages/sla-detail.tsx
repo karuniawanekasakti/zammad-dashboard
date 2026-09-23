@@ -72,9 +72,10 @@ function DetailRow({ label, children }: { label: string; children: ReactNode }) 
 }
 
 export default function SlaDetailPage({ isInline = false, ticketId }: SlaDetailPageProps) {
+  const { ticketId: routeId } = useParams<{ ticketId: string }>();
   const [articles, setArticles] = useState<TicketArticle[]>([]);
   const [loadingMore, setLoadingMore] = useState(false);
-  const { ticketId: routeId } = useParams<{ ticketId: string }>();
+  const [articlesError, setArticlesError] = useState(false);
   const id = ticketId ?? routeId;
   const scope = useScope();
   const ticket = useQuery({ queryKey: ["ticket", id], queryFn: () => api.getTicket(id!), enabled: !!id, refetchInterval: 30_000 });
@@ -88,6 +89,9 @@ export default function SlaDetailPage({ isInline = false, ticketId }: SlaDetailP
   const slaEntries = timeline.filter((entry) => entry.type !== "article");
 
   if (ticket.isLoading || monitor.isLoading || history.isLoading) return <PageLoader />;
+  // A failed request is not a missing ticket: report the failure instead of the
+  // not-found state, which a genuine miss (data === null) alone should reach.
+  if (ticket.isError) return <div className="text-sm text-destructive" role="alert">Unable to load this ticket. The request failed — please retry.</div>;
   if (!ticket.data) return <div className="text-sm text-muted-foreground">Ticket not found.</div>;
 
   const row = ticket.data.ticket;
@@ -95,7 +99,7 @@ export default function SlaDetailPage({ isInline = false, ticketId }: SlaDetailP
   const verdictsAvailable = slaVerdictsAvailable(monitor.data?.freshness);
   const status = verdictsAvailable ? slaStatus(row, now) : "no_sla";
   const remainingMs = verdictsAvailable ? slaRemainingMs(row, now) : null;
-  const total = ticket.data.total ?? ticket.data.articles.length ?? 0;
+  const total = ticket.data.total ?? ticket.data.articles.length;
   const hasMore = articles.length < total;
   const policy = policies.data?.find((candidate) => matchesPolicy(candidate, row));
   const zammadBase = (config.data?.zammad_base_url ?? FALLBACK_ZAMMAD_BASE).replace(/\/$/, "");
@@ -103,7 +107,14 @@ export default function SlaDetailPage({ isInline = false, ticketId }: SlaDetailP
   const loadMore = () => {
     if (loadingMore || !hasMore) return;
     setLoadingMore(true);
-    api.getTicketArticles(row.id, articles.length).then((page) => setArticles((current) => appendArticlePage(current, page))).finally(() => setLoadingMore(false));
+    setArticlesError(false);
+    api
+      .getTicketArticles(row.id, articles.length)
+      .then((page) => setArticles((current) => appendArticlePage(current, page)))
+      // A rejected page fetch must not look like an empty next page: surface it
+      // and always clear the loading flag so "Load More" stays usable.
+      .catch(() => setArticlesError(true))
+      .finally(() => setLoadingMore(false));
   };
 
   const slaHistory: TicketHistory[] = [
@@ -126,6 +137,8 @@ export default function SlaDetailPage({ isInline = false, ticketId }: SlaDetailP
   };
 
   const content = <div className="space-y-6">
+    {history.isError && <div className="text-sm text-destructive" role="alert">Ticket history failed to load — SLA events shown here may be incomplete.</div>}
+    {!verdictsAvailable && history.isPending && <div className="text-sm text-muted-foreground">Loading ticket history…</div>}
     {!verdictsAvailable && <Card className="border-amber-500/50 bg-amber-500/5"><CardContent className="flex gap-3 py-4 text-sm"><AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-600" /><div><p className="font-medium">SLA verdict unavailable</p><p className="text-muted-foreground">The synchronized dataset is not up to date, so this page will not present a stale verdict as current.</p></div></CardContent></Card>}
 
     {!isInline && <div className="flex flex-col gap-4 border-b pb-6 sm:flex-row sm:items-start sm:justify-between">
@@ -141,12 +154,12 @@ export default function SlaDetailPage({ isInline = false, ticketId }: SlaDetailP
     <Card><CardHeader><CardTitle>Milestone performance</CardTitle><CardDescription>First Response and Resolution use independent clocks and recorded outcomes.</CardDescription></CardHeader><CardContent className="grid gap-6 lg:grid-cols-2"><MilestoneCard title="First Response" deadline={row.first_response_escalation_at} completedAt={row.first_response_at} result={formatMinutes(row.first_response_diff_in_min)} breached={row.first_response_breached || (row.first_response_diff_in_min ?? 0) < 0}><MilestoneProgressBar label="First Response" history={slaHistory} deadline={verdictsAvailable ? slaDeadline(firstResponseSla) : null} now={firstResponseCurrent} status={verdictsAvailable ? slaStatus(firstResponseSla, firstResponseCurrent) : "no_sla"} progressPct={verdictsAvailable ? slaProgress(firstResponseSla, firstResponseCurrent) : 0} ticketCreated={new Date(row.zammad_created_at)} /></MilestoneCard><MilestoneCard title="Resolution" deadline={row.close_escalation_at} completedAt={row.close_at ?? row.closed_at} result={formatMinutes(row.close_diff_in_min)} breached={row.close_breached || (row.close_diff_in_min ?? 0) < 0}><MilestoneProgressBar label="Resolution" history={slaHistory} deadline={verdictsAvailable ? slaDeadline(resolutionSla) : null} now={resolutionCurrent} status={verdictsAvailable ? slaStatus(resolutionSla, resolutionCurrent) : "no_sla"} progressPct={verdictsAvailable ? slaProgress(resolutionSla, resolutionCurrent) : 0} ticketCreated={new Date(row.zammad_created_at)} /></MilestoneCard></CardContent></Card>
 
     <div className="grid gap-6 xl:grid-cols-[minmax(0,1.25fr)_minmax(320px,0.75fr)]">
-      <Card><CardHeader><CardTitle>SLA timeline</CardTitle><CardDescription>Recorded SLA transitions in chronological order.</CardDescription></CardHeader><CardContent>{slaEntries.length ? <ol className="relative ml-2 border-l">{slaEntries.map((entry) => <TimelineEntry key={entry.id} entry={entry} />)}</ol> : <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">No SLA events recorded.</div>}</CardContent></Card>
+      <Card><CardHeader><CardTitle>SLA timeline</CardTitle><CardDescription>Recorded SLA transitions in chronological order.</CardDescription></CardHeader><CardContent>{history.isError ? <div className="rounded-lg border border-dashed border-destructive/50 p-6 text-sm text-destructive">SLA transitions could not be loaded.</div> : history.isPending ? <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">Loading SLA transitions…</div> : slaEntries.length ? <ol className="relative ml-2 border-l">{slaEntries.map((entry) => <TimelineEntry key={entry.id} entry={entry} />)}</ol> : <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">No SLA events recorded.</div>}</CardContent></Card>
       <div className="space-y-6"><Card><CardHeader><CardTitle className="text-base">Calculation details</CardTitle></CardHeader><CardContent><dl className="text-sm"><DetailRow label="Active deadline">{formatDate(slaDeadline(row)?.toISOString())}</DetailRow><DetailRow label="First response elapsed">{row.first_response_in_min == null ? "Not completed" : `${row.first_response_in_min}m`}</DetailRow><DetailRow label="First response margin">{formatMinutes(row.first_response_diff_in_min)}</DetailRow><DetailRow label="Resolution elapsed">{row.close_in_min == null ? "Not completed" : `${row.close_in_min}m`}</DetailRow><DetailRow label="Resolution margin">{formatMinutes(row.close_diff_in_min)}</DetailRow><DetailRow label="Update margin">{formatMinutes(row.update_diff_in_min)}</DetailRow></dl></CardContent></Card>
-      <Card><CardHeader><CardTitle className="text-base">Relevant SLA configuration</CardTitle><CardDescription>{policy ? "Policy candidate matched from the ticket fields available here; Zammad does not identify the applied policy on the ticket." : "No policy could be matched safely from the ticket fields available here."}</CardDescription></CardHeader><CardContent>{policy ? <dl className="text-sm"><DetailRow label="Policy candidate">{policy.name}</DetailRow><DetailRow label="Calendar">{policy.calendar_id ? `Calendar #${policy.calendar_id}` : "Default calendar"}</DetailRow><DetailRow label="First response target">{policy.first_response_time == null ? "Not set" : `${policy.first_response_time}m`}</DetailRow><DetailRow label="Update target">{policy.update_time == null ? "Not set" : `${policy.update_time}m`}</DetailRow><DetailRow label="Resolution target">{policy.solution_time == null ? "Not set" : `${policy.solution_time}m`}</DetailRow></dl> : <p className="text-sm text-muted-foreground">Use the recorded deadlines and margins above as the authoritative calculation for this ticket.</p>}</CardContent></Card></div>
+      <Card><CardHeader><CardTitle className="text-base">Relevant SLA configuration</CardTitle><CardDescription>{policy ? "Policy candidate matched from the ticket fields available here; Zammad does not identify the applied policy on the ticket." : "No policy could be matched safely from the ticket fields available here."}</CardDescription></CardHeader><CardContent>{policy ? <dl className="text-sm"><DetailRow label="Policy candidate">{policy.name}</DetailRow><DetailRow label="Calendar">{policy.calendar_id ? `Calendar #${policy.calendar_id}` : "Default calendar"}</DetailRow><DetailRow label="First response target">{policy.first_response_time == null ? "Not set" : `${policy.first_response_time}m`}</DetailRow><DetailRow label="Update target">{policy.update_time == null ? "Not set" : `${policy.update_time}m`}</DetailRow><DetailRow label="Resolution target">{policy.solution_time == null ? "Not set" : `${policy.solution_time}m`}</DetailRow></dl> : policies.isError ? <p className="text-sm text-destructive" role="alert">SLA policies could not be loaded, so no policy candidate can be evaluated.</p> : <p className="text-sm text-muted-foreground">{policies.isLoading ? "Loading SLA policies…" : "Use the recorded deadlines and margins above as the authoritative calculation for this ticket."}</p>}</CardContent></Card></div>
     </div>
 
-    <Card><CardHeader><CardTitle>Events and ticket history</CardTitle><CardDescription>Use SLA events for investigation, or inspect the complete conversation when context is needed.</CardDescription></CardHeader><CardContent><Tabs defaultValue="sla"><TabsList aria-label="Activity view"><TabsTrigger value="sla">SLA events</TabsTrigger><TabsTrigger value="full">Full history</TabsTrigger></TabsList><TabsContent value="sla" className="space-y-3 pt-3">{slaEntries.length ? slaEntries.map((entry) => <div key={entry.id} className="flex items-center justify-between gap-3 rounded-lg border p-3 text-sm"><span className="font-medium">{entry.label}</span><time dateTime={entry.timestamp} className="text-xs text-muted-foreground">{formatDate(entry.timestamp)}</time></div>) : <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">No SLA events recorded.</div>}</TabsContent><TabsContent value="full" className="space-y-3 pt-3"><VirtualizedArticleList articles={articles} total={total} hasMore={hasMore} loadingMore={loadingMore} onLoadMore={loadMore} renderArticle={renderArticle} /></TabsContent></Tabs></CardContent></Card>
+    <Card><CardHeader><CardTitle>Events and ticket history</CardTitle><CardDescription>Use SLA events for investigation, or inspect the complete conversation when context is needed.</CardDescription></CardHeader><CardContent><Tabs defaultValue="sla"><TabsList aria-label="Activity view"><TabsTrigger value="sla">SLA events</TabsTrigger><TabsTrigger value="full">Full history</TabsTrigger></TabsList><TabsContent value="sla" className="space-y-3 pt-3">{slaEntries.length ? slaEntries.map((entry) => <div key={entry.id} className="flex items-center justify-between gap-3 rounded-lg border p-3 text-sm"><span className="font-medium">{entry.label}</span><time dateTime={entry.timestamp} className="text-xs text-muted-foreground">{formatDate(entry.timestamp)}</time></div>) : <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">{history.isError ? "SLA events could not be loaded." : history.isPending ? "Loading SLA events…" : "No SLA events recorded."}</div>}</TabsContent><TabsContent value="full" className="space-y-3 pt-3"><VirtualizedArticleList articles={articles} total={total} hasMore={hasMore} loadingMore={loadingMore} onLoadMore={loadMore} renderArticle={renderArticle} />{articlesError && <p className="mt-3 text-sm text-destructive" role="alert">Could not load more articles. The request failed — use “Load More” to retry.</p>}</TabsContent></Tabs></CardContent></Card>
   </div>;
 
   return isInline ? content : <main>{content}</main>;

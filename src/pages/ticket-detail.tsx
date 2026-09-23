@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useMemo, useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ArrowDownUp, ArrowLeft, AlertTriangle, Bell, CheckCircle2, ChevronDown, ChevronUp, Clock, FileText, Lock, Mail, MessageSquare, Pause, Phone, Play, RefreshCw, RotateCcw, Tag, TriangleAlert, User } from "lucide-react";
 import { format, formatDistanceToNow } from "date-fns";
@@ -58,7 +58,7 @@ type TimelineFilter = (typeof FILTERS)[number]["key"];
 
 export default function TicketDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["ticket", id],
     queryFn: () => api.getTicket(id!),
     enabled: !!id,
@@ -73,6 +73,7 @@ export default function TicketDetailPage() {
   // the ticket, and each "Load More" appends the next page.
   const [articles, setArticles] = useState<TicketArticle[]>([]);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [articlesError, setArticlesError] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
   const scrollKey = `ticket:${id}:scroll`;
   const articlesKey = `ticket:${id}:articles`;
@@ -98,6 +99,9 @@ export default function TicketDetailPage() {
   const total = data?.total ?? 0;
 
   if (isLoading) return <PageLoader />;
+  // A failed request is not an empty ticket: report the failure instead of
+  // presenting the not-found state that a genuine miss (data === null) gets.
+  if (isError) return <div className="text-sm text-destructive" role="alert">Unable to load this ticket. The request failed — please retry.</div>;
   if (!data) return <div className="text-sm text-muted-foreground">Ticket not found.</div>;
 
   const { ticket } = data;
@@ -137,9 +141,13 @@ export default function TicketDetailPage() {
   const loadMore = () => {
     if (loadingMore || !hasMore) return;
     setLoadingMore(true);
+    setArticlesError(false);
     api
       .getTicketArticles(ticket.id, articles.length)
       .then((page) => setArticles((current) => appendArticlePage(current, page)))
+      // A rejected page fetch must not look like an empty next page: surface it
+      // and always clear the loading flag so "Load More" stays usable.
+      .catch(() => setArticlesError(true))
       .finally(() => setLoadingMore(false));
   };
 
@@ -226,6 +234,11 @@ export default function TicketDetailPage() {
                 onLoadMore={loadMore}
                 renderArticle={renderArticle}
               />
+              {articlesError && (
+                <p className="mt-3 text-sm text-destructive" role="alert">
+                  Could not load more articles. The request failed — use “Load More” to retry.
+                </p>
+              )}
             </CardContent>
           </Card>
 
@@ -393,7 +406,7 @@ function readableHref(href: string | null) {
 }
 
 const SLA_EVENT_META: Record<SlaEventType, { icon: typeof Clock; className: string }> = {
-  sla_start: { icon: Play, className: "text-blue-600" },
+  sla_start: { icon: Clock, className: "text-blue-600" },
   sla_pause: { icon: Pause, className: "text-amber-600" },
   sla_resume: { icon: Play, className: "text-blue-600" },
   sla_warning: { icon: TriangleAlert, className: "text-amber-600" },
@@ -406,7 +419,7 @@ export function SlaActivityTimeline({ history, articles, loading, error }: { his
   const entries = useMemo(() => mergeSlaTimeline(history, articles), [history, articles]);
 
   if (loading) return <TimelineSkeleton />;
-  if (error) return <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">SLA history could not be loaded.</div>;
+  if (error) return <div className="rounded-lg border border-dashed border-destructive/50 p-6 text-sm text-destructive" role="alert">SLA history could not be loaded — this is a request failure, not an empty timeline.</div>;
   if (!entries.length) return <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">No activities attached to this ticket.</div>;
 
   const renderEntries = (rows: SlaTimelineEntry[]) => rows.length ? (

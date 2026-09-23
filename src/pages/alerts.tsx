@@ -4,6 +4,8 @@ import { Bell, Pencil, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { PageHeader } from "@/components/page-header";
+import { PageLoader } from "@/components/spinner";
+import { DataError } from "@/components/data-error";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -67,7 +69,7 @@ const emptyForm: FormState = {
 
 export default function AlertsPage() {
   const qc = useQueryClient();
-  const rules = useQuery({ queryKey: ["alert-rules"], queryFn: () => api.listAlertRules() });
+  const { data: rules, isLoading, isError, refetch } = useQuery({ queryKey: ["alert-rules"], queryFn: () => api.listAlertRules() });
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState<FormState>(emptyForm);
 
@@ -90,6 +92,7 @@ export default function AlertsPage() {
       qc.invalidateQueries({ queryKey: ["alert-rules"] });
       setOpen(false);
     },
+    onError: (e: Error) => toast.error(`Could not save alert rule: ${e.message}`),
   });
 
   const del = useMutation({
@@ -98,6 +101,7 @@ export default function AlertsPage() {
       toast.success("Rule deleted");
       qc.invalidateQueries({ queryKey: ["alert-rules"] });
     },
+    onError: (e: Error) => toast.error(`Could not delete alert rule: ${e.message}`),
   });
 
   const edit = (rule: AlertRule) => {
@@ -113,7 +117,10 @@ export default function AlertsPage() {
     setOpen(true);
   };
 
+  if (isLoading) return <PageLoader />;
+
   return (
+
     <div className="space-y-4">
       <PageHeader
         title="Alert Rules"
@@ -133,6 +140,9 @@ export default function AlertsPage() {
 
       <Card>
         <CardContent className="pt-6">
+          {isError ? (
+            <DataError title="alert rules" detail="GET /alerts/rules" onRetry={() => refetch()} variant="page" />
+          ) : (
           <Table>
             <TableHeader>
               <TableRow>
@@ -146,14 +156,14 @@ export default function AlertsPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {(rules.data ?? []).length === 0 && (
+              {(rules ?? []).length === 0 && (
                 <TableRow>
                   <TableCell colSpan={7} className="text-center py-10 text-muted-foreground">
                     No alert rules yet. Create your first one.
                   </TableCell>
                 </TableRow>
               )}
-              {(rules.data ?? []).map((r) => (
+              {(rules ?? []).map((r) => (
                 <TableRow key={r.id}>
                   <TableCell className="font-medium flex items-center gap-2">
                     <Bell className="size-3.5 text-muted-foreground" />
@@ -204,6 +214,7 @@ export default function AlertsPage() {
               ))}
             </TableBody>
           </Table>
+          )}
         </CardContent>
       </Card>
 

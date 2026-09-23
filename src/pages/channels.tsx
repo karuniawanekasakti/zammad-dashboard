@@ -4,6 +4,7 @@ import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { PageHeader } from "@/components/page-header";
+import { DataError } from "@/components/data-error";
 import { PageLoader } from "@/components/spinner";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -22,7 +23,7 @@ const ICONS: Record<AlertChannel, React.ElementType> = {
 
 export default function ChannelsPage() {
   const qc = useQueryClient();
-  const channels = useQuery({ queryKey: ["channels"], queryFn: () => api.listChannels() });
+  const { data: channels, isLoading, isError, refetch } = useQuery({ queryKey: ["channels"], queryFn: () => api.listChannels() });
   const test = useMutation({
     mutationFn: (id: string) => api.testChannel(id),
     onSuccess: (r) => {
@@ -31,14 +32,17 @@ export default function ChannelsPage() {
     },
   });
 
-  if (channels.isLoading) return <PageLoader />;
+  if (isLoading) return <PageLoader />;
 
   return (
     <div className="space-y-4">
       <PageHeader title="Channels" description="Configure where your alerts are delivered." />
 
+      {isError ? (
+        <DataError title="channels" detail="GET /channels" onRetry={() => refetch()} variant="page" />
+      ) : (
       <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-        {(channels.data ?? []).map((c) => {
+        {(channels ?? []).map((c) => {
           const Icon = ICONS[c.channel_type] ?? MessageCircle;
           return (
             <Card key={c.id}>
@@ -82,6 +86,7 @@ export default function ChannelsPage() {
           );
         })}
       </div>
+      )}
     </div>
   );
 }

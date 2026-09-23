@@ -14,6 +14,8 @@ import {
 import { api } from "@/lib/api";
 import { useScope } from "@/stores/auth";
 import { PageHeader } from "@/components/page-header";
+import { DataError } from "@/components/data-error";
+import { Spinner } from "@/components/spinner";
 import { ChartCard } from "@/components/chart-card";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -88,6 +90,15 @@ export default function OverviewPage() {
   const rows = data?.tickets ?? [];
   const total = data?.total ?? 0;
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+  // Chart, counts and the table are only authoritative once the primary query
+  // has resolved; until then a zero is a fabrication, not an absence of data.
+  const overviewPending = overview.isLoading;
+  const retryOverview = () => {
+    void groups.refetch();
+    void agents.refetch();
+    void overview.refetch();
+  };
 
   const resetRange = (nextPeriod: OverviewPeriod) => {
     setPeriod(nextPeriod);
@@ -186,20 +197,29 @@ export default function OverviewPage() {
             />
           }
         >
-          <div className="h-80">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={data?.chart ?? []} margin={{ left: 0, right: 12, top: 8, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                <XAxis dataKey="label" tick={{ fontSize: 11 }} />
-                <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
-                <Tooltip contentStyle={{ background: "hsl(var(--popover))", border: "1px solid hsl(var(--border))", borderRadius: 8 }} />
-                <Legend />
-                {METRICS.filter((m) => visible[m.key]).map((metric) => (
-                  <Line key={metric.key} type="monotone" dataKey={metric.key} name={metric.label} stroke={COLORS[metric.key]} strokeWidth={2} dot={false} />
-                ))}
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
+          {overviewPending ? (
+            <div className="flex h-80 items-center justify-center gap-2 text-sm text-muted-foreground">
+              <Spinner />
+              Loading chart…
+            </div>
+          ) : overview.isError ? (
+            <DataError title="the ticket count chart" detail="Request gagal: GET /overview" onRetry={retryOverview} />
+          ) : (
+            <div className="h-80">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={data?.chart ?? []} margin={{ left: 0, right: 12, top: 8, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                  <XAxis dataKey="label" tick={{ fontSize: 11 }} />
+                  <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
+                  <Tooltip contentStyle={{ background: "hsl(var(--popover))", border: "1px solid hsl(var(--border))", borderRadius: 8 }} />
+                  <Legend />
+                  {METRICS.filter((m) => visible[m.key]).map((metric) => (
+                    <Line key={metric.key} type="monotone" dataKey={metric.key} name={metric.label} stroke={COLORS[metric.key]} strokeWidth={2} dot={false} />
+                  ))}
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          )}
         </ChartCard>
       </div>
 
@@ -217,12 +237,16 @@ export default function OverviewPage() {
           <div>
             <CardTitle className="text-base">Records</CardTitle>
             <CardDescription>
-              {formatNumber(tableMetric === "created" ? (data?.totals.created ?? 0) : total)} {tableMetric} ticket(s) in this view
+              {overviewPending
+                ? "Counting…"
+                : overview.isError
+                  ? "Count unavailable."
+                  : `${formatNumber(tableMetric === "created" ? (data?.totals.created ?? 0) : total)} ${tableMetric} ticket(s) in this view`}
             </CardDescription>
           </div>
-          <Button variant="outline" size="sm" onClick={downloadCsv} disabled={!total}>
+          <Button variant="outline" size="sm" onClick={downloadCsv} disabled={overviewPending || overview.isError || !total}>
             <Download className="size-3.5" />
-            Download {formatNumber(Math.min(total, EXPORT_SIZE))} record(s)
+            {overviewPending || overview.isError ? "Download records" : `Download ${formatNumber(Math.min(total, EXPORT_SIZE))} record(s)`}
           </Button>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -240,12 +264,24 @@ export default function OverviewPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {!overview.isLoading && rows.length === 0 && (
+                {overviewPending ? (
+                  <TableRow>
+                    <TableCell colSpan={7} className="py-10 text-center text-muted-foreground">
+                      <div className="flex items-center justify-center gap-2">
+                        <Spinner />
+                        Loading overview…
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ) : overview.isError ? (
+                  <TableRow>
+                    <TableCell colSpan={7} className="py-10">
+                      <DataError title="the overview records" detail="Request gagal: GET /overview" onRetry={retryOverview} />
+                    </TableCell>
+                  </TableRow>
+                ) : rows.length === 0 ? (
                   <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground py-10">No records match this period.</TableCell></TableRow>
-                )}
-                {overview.isLoading && (
-                  <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground py-10">Loading overview…</TableCell></TableRow>
-                )}
+                ) : null}
                 {rows.map((ticket) => (
                   <TableRow key={ticket.id}>
                     <TableCell className="font-mono text-xs">#{ticket.number}</TableCell>

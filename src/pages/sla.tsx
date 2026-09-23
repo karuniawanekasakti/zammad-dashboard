@@ -101,9 +101,11 @@ export default function SlaPage() {
             <Badge variant={freshness?.status === "out_of_date" ? "warning" : "secondary"}>Data freshness: {freshnessLabel}</Badge>
             <span className="font-medium">SLA verdicts are unavailable — the synchronized dataset is not up to date.</span>
             <span className="text-muted-foreground">
-              {freshness?.last_success_at
-                ? `Last successful sync ${formatDistanceToNow(new Date(freshness.last_success_at), { addSuffix: true })}. The figures below describe that older dataset, not the present moment.`
-                : "No successful synchronization checkpoint is available, so there is no data to judge."}
+              {config.isError
+                ? "The Zammad base URL lookup also failed, so external links are unavailable. This page shows last-known data."
+                : freshness?.last_success_at
+                  ? `Last successful sync ${formatDistanceToNow(new Date(freshness.last_success_at), { addSuffix: true })}. The figures below describe that older dataset, not the present moment.`
+                  : "No successful synchronization checkpoint is available, so there is no data to judge."}
             </span>
           </CardContent>
         </Card>

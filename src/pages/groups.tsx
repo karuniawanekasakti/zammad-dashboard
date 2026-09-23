@@ -5,17 +5,26 @@ import { api } from "@/lib/api";
 import { useScope } from "@/stores/auth";
 import { PageHeader } from "@/components/page-header";
 import { PageLoader } from "@/components/spinner";
+import { DataError } from "@/components/data-error";
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatPercent, formatSeconds, formatNumber } from "@/lib/utils";
 
 export default function GroupsPage() {
   const scope = useScope();
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ["groups", scope],
     queryFn: () => api.listGroups(scope),
   });
   if (isLoading) return <PageLoader />;
+  if (isError) {
+    return (
+      <div className="space-y-4">
+        <PageHeader title="Groups" description="Team-level workload and SLA metrics." />
+        <DataError title="groups" detail="GET /groups" onRetry={() => refetch()} variant="page" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">

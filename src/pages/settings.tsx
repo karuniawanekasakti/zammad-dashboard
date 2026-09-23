@@ -4,7 +4,9 @@ import { Loader2, PlugZap, RefreshCw, Shield, Save, Database, Server, AlertTrian
 import { format, formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
+import { DataError } from "@/components/data-error";
 import { PageHeader } from "@/components/page-header";
+import { PageLoader } from "@/components/spinner";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -46,7 +48,7 @@ export default function SettingsPage() {
 
   const s = settings.data;
   const [confirmFull, setConfirmFull] = useState(false);
-  const [schedules, setSchedules] = useState({ incremental_seconds: 300, full_reconcile_seconds: 21600 });
+  const [schedules, setSchedules] = useState<{ incremental_seconds: number; full_reconcile_seconds: number } | null>(null);
   useEffect(() => {
     if (s?.schedules) setSchedules(s.schedules);
   }, [s?.schedules]);
@@ -125,6 +127,31 @@ export default function SettingsPage() {
     automaticRequest.current = request.key;
     triggerAutomatic.mutate(request.kind);
   }, [st?.automatic, st?.freshness?.last_success_at, st?.latest_attempt?.operation_id, statusQuery.isSuccess]);
+  if (settings.isError || statusQuery.isError) {
+    return (
+      <div className="space-y-4">
+        <PageHeader title="System Settings" description="Admin-only. Worker config, manual sync, health monitoring." />
+        <DataError
+          title="system settings"
+          detail="Configuration and live status could not be loaded."
+          onRetry={() => {
+            settings.refetch();
+            statusQuery.refetch();
+          }}
+          variant="page"
+        />
+      </div>
+    );
+  }
+  if (settings.isPending || statusQuery.isPending) {
+    return (
+      <div className="space-y-4">
+        <PageHeader title="System Settings" description="Admin-only. Worker config, manual sync, health monitoring." />
+        <PageLoader label="Loading system settings…" />
+      </div>
+    );
+  }
+  if (!s || !st) return null;
   const freshness = syncStatus?.freshness;
   const execution = syncStatus?.execution;
   const latestAttempt = syncStatus?.latest_attempt;
@@ -225,8 +252,8 @@ export default function SettingsPage() {
                   <Label>Incremental sync (seconds)</Label>
                   <Input
                     type="number"
-                    value={schedules.incremental_seconds}
-                    onChange={(e) => setSchedules((current) => ({ ...current, incremental_seconds: parseInt(e.target.value, 10) }))}
+                    value={schedules?.incremental_seconds ?? s.schedules.incremental_seconds}
+                    onChange={(e) => setSchedules((current) => ({ ...(current ?? s.schedules), incremental_seconds: parseInt(e.target.value, 10) }))}
                     min={30}
                     max={604800}
                   />
@@ -236,8 +263,8 @@ export default function SettingsPage() {
                   <Label>Full reconcile (seconds)</Label>
                   <Input
                     type="number"
-                    value={schedules.full_reconcile_seconds}
-                    onChange={(e) => setSchedules((current) => ({ ...current, full_reconcile_seconds: parseInt(e.target.value, 10) }))}
+                    value={schedules?.full_reconcile_seconds ?? s.schedules.full_reconcile_seconds}
+                    onChange={(e) => setSchedules((current) => ({ ...(current ?? s.schedules), full_reconcile_seconds: parseInt(e.target.value, 10) }))}
                     min={30}
                     max={604800}
                   />
@@ -250,8 +277,8 @@ export default function SettingsPage() {
                   Zammad: <span className="font-medium">{s?.zammad_base_url ?? "—"}</span>
                 </div>
                 <Button
-                  onClick={() => saveSchedules.mutate(schedules)}
-                  disabled={saveSchedules.isPending}
+                  onClick={() => schedules && saveSchedules.mutate(schedules)}
+                  disabled={!schedules || saveSchedules.isPending}
                 >
                   {saveSchedules.isPending ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
                   Save Schedules

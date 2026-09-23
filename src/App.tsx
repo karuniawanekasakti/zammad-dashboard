@@ -10,6 +10,7 @@ import AgentsPage from "@/pages/agents";
 import AgentDetailPage from "@/pages/agent-detail";
 import GroupsPage from "@/pages/groups";
 import GroupDetailPage from "@/pages/group-detail";
+import SlaPage from "@/pages/sla";
 import SlaDetailPage from "@/pages/sla-detail";
 import PerformancePage from "@/pages/performance";
 import SettingsPage from "@/pages/settings";
@@ -29,6 +30,7 @@ export default function App() {
         <Route path="/agents/:id" element={<AgentDetailPage />} />
         <Route path="/groups" element={<RequireAuth roles={["admin", "team_lead", "project_manager"]}><GroupsPage /></RequireAuth>} />
         <Route path="/groups/:id" element={<GroupDetailPage />} />
+        <Route path="/sla" element={<RequireAuth roles={["admin", "team_lead", "project_manager"]}><SlaPage /></RequireAuth>} />
         <Route path="/sla/detail/:ticketId" element={<RequireAuth roles={["admin", "team_lead", "project_manager"]}><SlaDetailPage /></RequireAuth>} />
         <Route path="/performance" element={<RequireAuth roles={["admin", "team_lead", "project_manager"]}><PerformancePage /></RequireAuth>} />
         <Route path="/settings/channels" element={<ChannelsPage />} />

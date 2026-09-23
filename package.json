@@ -14,6 +14,7 @@
     "check:sla-timeline": "node --experimental-strip-types check_sla_timeline.ts",
     "check:articles": "node --experimental-strip-types check_article_pagination.ts",
     "check:overview": "node --experimental-strip-types check_overview_severity.ts",
+    "check:metrics": "node --experimental-strip-types check_sla_manager_metrics.ts",
     "preview": "vite preview"
   },
   "dependencies": {

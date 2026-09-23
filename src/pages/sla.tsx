@@ -1,27 +1,25 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { formatDistanceToNow } from "date-fns";
-import { AlertTriangle, CheckCircle2, Flame } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, Cell, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { api } from "@/lib/api";
 import { slaVerdictsAvailable } from "@/lib/sla-deadline";
 import { useScope } from "@/stores/auth";
 import { PageHeader } from "@/components/page-header";
 import { PageLoader } from "@/components/spinner";
-import { KpiCard } from "@/components/kpi-card";
 import { ChartCard } from "@/components/chart-card";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { PriorityBadge } from "@/components/status-badges";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { cn, formatNumber, formatPercent } from "@/lib/utils";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import type { SlaMonitorData, SlaMonitorRow, SlaMonitorTicket, SlaStatus, Ticket } from "@/types";
+import type { ManagerMetricsPeriod, SlaMonitorData, SlaMonitorRow, Ticket } from "@/types";
+import { ManagerMetricsSummary } from "@/components/sla/manager-metrics-summary";
+import { SlaDashboardList } from "@/components/sla/sla-dashboard-list";
 
-type TabValue = "all" | "on_track" | "warning" | "critical" | "breached" | "no_sla";
 
 const SLA_GROUP_PAGE_SIZE = 5;
 
@@ -39,17 +37,7 @@ const FRESHNESS_LABELS = {
   out_of_date: "Out of Date",
 } as const;
 
-const UNAVAILABLE_HELPER = "Unavailable — dataset not up to date";
 
-const STATUS_META: Record<SlaStatus, { label: string; bar: string; text: string; icon: string }> = {
-  safe: { label: "On track", bar: "bg-emerald-500", text: "text-emerald-600 dark:text-emerald-400", icon: "bg-emerald-500" },
-  on_track: { label: "On track", bar: "bg-emerald-500", text: "text-emerald-600 dark:text-emerald-400", icon: "bg-emerald-500" },
-  warning: { label: "Warning", bar: "bg-amber-500", text: "text-amber-600 dark:text-amber-400", icon: "bg-amber-500" },
-  critical: { label: "Critical", bar: "bg-orange-500", text: "text-orange-600 dark:text-orange-400", icon: "bg-orange-500" },
-  breached: { label: "Breached", bar: "bg-red-600", text: "text-red-600 dark:text-red-400", icon: "bg-red-600" },
-  no_sla: { label: "Unmonitored", bar: "bg-muted-foreground", text: "text-muted-foreground", icon: "bg-muted-foreground" },
-  closed_on_time: { label: "Closed on time", bar: "bg-emerald-500", text: "text-emerald-600 dark:text-emerald-400", icon: "bg-emerald-500" },
-};
 
 const CHART_COLORS = {
   safe: "hsl(142 71% 45%)",
@@ -61,7 +49,7 @@ const CHART_COLORS = {
 export default function SlaPage() {
   const [groupFilter, setGroupFilter] = useState<string>("all");
   const [priorityFilter, setPriorityFilter] = useState<Ticket["priority"] | "all">("all");
-  const [statusTab, setStatusTab] = useState<TabValue>("all");
+  const [metricsPeriod, setMetricsPeriod] = useState<ManagerMetricsPeriod>("month");
   const [groupPage, setGroupPage] = useState(0);
   const [showAllBreaches, setShowAllBreaches] = useState(false);
 
@@ -71,10 +59,7 @@ export default function SlaPage() {
   const monitor = useQuery({ queryKey: ["sla", "monitor", scope, groupFilter, priorityFilter], queryFn: () => api.listSlaMonitor(scope, groupFilter, priorityFilter), refetchInterval: 60_000 });
 
   const data = monitor.data;
-  const tableRows = useMemo(() => {
-    const rows = data?.tickets ?? [];
-    return statusTab === "all" ? rows : rows.filter((t) => t.live_sla_status === statusTab);
-  }, [data?.tickets, statusTab]);
+  const tableRows = data?.tickets ?? [];
   const zammadBase = (config.data?.zammad_base_url ?? FALLBACK_ZAMMAD_BASE).replace(/\/$/, "");
   const { index: groupPageIndex, pageCount: groupPageCount, start: groupPageStart } = slaGroupPage(data?.sla_rows.length ?? 0, groupPage);
   const groupRows = data?.sla_rows.slice(groupPageStart, groupPageStart + SLA_GROUP_PAGE_SIZE) ?? [];
@@ -145,12 +130,14 @@ export default function SlaPage() {
         </CardContent>
       </Card>
 
-      <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
-        <KpiCard title="Compliance Rate" value={verdictsAvailable ? (data.summary.compliance_rate == null ? "-" : formatPercent(data.summary.compliance_rate, 0)) : "—"} helper={verdictsAvailable ? `${formatNumber(data.summary.total_with_sla - data.summary.breached)} of ${formatNumber(data.summary.total_with_sla)} tiket met SLA` : UNAVAILABLE_HELPER} icon={CheckCircle2} iconClassName={verdictsAvailable ? complianceIcon(data.summary.compliance_rate) : "bg-muted text-muted-foreground"} />
-        <KpiCard title="On Track" value={verdictsAvailable ? formatNumber(data.summary.on_track) : "—"} helper={verdictsAvailable ? "within SLA deadline" : UNAVAILABLE_HELPER} icon={CheckCircle2} iconClassName={verdictsAvailable ? "bg-emerald-500/15 text-emerald-600" : "bg-muted text-muted-foreground"} />
-        <KpiCard title="At-Risk" value={verdictsAvailable ? formatNumber(data.summary.at_risk) : "—"} helper={verdictsAvailable ? "Warning ≤ 2 jam · Critical ≤ 30 menit" : UNAVAILABLE_HELPER} icon={AlertTriangle} iconClassName={verdictsAvailable ? "bg-amber-500/15 text-amber-600" : "bg-muted text-muted-foreground"} />
-        <KpiCard title="Breached" value={verdictsAvailable ? formatNumber(data.summary.breached) : "—"} helper={verdictsAvailable ? "SLA deadline passed" : UNAVAILABLE_HELPER} icon={Flame} iconClassName={verdictsAvailable ? "bg-red-500/15 text-red-600" : "bg-muted text-muted-foreground"} />
-      </div>
+      {verdictsAvailable && (
+        <ManagerMetricsSummary
+          monitor={data}
+          scope={scope.role}
+          period={metricsPeriod}
+          onPeriodChange={setMetricsPeriod}
+        />
+      )}
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>
@@ -182,45 +169,11 @@ export default function SlaPage() {
         </Card>
       </div>
 
-      <Card>
-        <CardHeader className="gap-3 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <CardTitle className="text-base">Tiket Mendekati Breach</CardTitle>
-            <CardDescription>Breached di atas, lalu deadline terdekat.</CardDescription>
-          </div>
-          <Tabs value={statusTab} onValueChange={(v) => setStatusTab(v as TabValue)}>
-            <TabsList>
-              <TabsTrigger value="all">Semua</TabsTrigger>
-              <TabsTrigger value="on_track">On Track</TabsTrigger>
-              <TabsTrigger value="warning">Warning</TabsTrigger>
-              <TabsTrigger value="critical">Critical</TabsTrigger>
-              <TabsTrigger value="breached">Breached</TabsTrigger>
-              <TabsTrigger value="no_sla">Unmonitored</TabsTrigger>
-            </TabsList>
-          </Tabs>
-        </CardHeader>
-        <CardContent>
-          <div className="overflow-x-auto rounded-md border">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>#</TableHead>
-                  <TableHead>Title</TableHead>
-                  <TableHead>Priority</TableHead>
-                  <TableHead>Group</TableHead>
-                  <TableHead>Agent</TableHead>
-                  <TableHead>Deadline</TableHead>
-                  <TableHead>Status</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {tableRows.length === 0 && <EmptyRow colSpan={7} text={verdictsAvailable ? emptyText(statusTab) : "SLA verdicts are unavailable while the dataset is not up to date."} />}
-                {tableRows.map((t) => <RiskRow key={t.id} ticket={t} verdictsAvailable={verdictsAvailable} />)}
-              </TableBody>
-            </Table>
-          </div>
-        </CardContent>
-      </Card>
+      {verdictsAvailable ? (
+        <SlaDashboardList tickets={tableRows} scope={scope.role} />
+      ) : (
+        <Card><CardContent className="py-10 text-center text-sm text-muted-foreground">SLA verdicts are unavailable while the dataset is not up to date.</CardContent></Card>
+      )}
 
       <ChartCard title="Tren Compliance" description="Compliance rate harian tiket closed dalam 7 hari terakhir.">
         {verdictsAvailable ? (
@@ -303,33 +256,6 @@ function ComplianceRow({ row, verdictsAvailable }: { row: SlaMonitorRow; verdict
   );
 }
 
-function RiskRow({ ticket, verdictsAvailable }: { ticket: SlaMonitorTicket; verdictsAvailable: boolean }) {
-  const meta = STATUS_META[ticket.live_sla_status];
-  return (
-    <TableRow>
-      <TableCell className="font-mono text-xs"><Link className="hover:underline" to={`/tickets/${ticket.id}`}>#{ticket.number}</Link></TableCell>
-      <TableCell className="max-w-sm truncate">{ticket.title}</TableCell>
-      <TableCell><PriorityBadge priority={ticket.priority} /></TableCell>
-      <TableCell className="text-sm">{ticket.group_name}</TableCell>
-      <TableCell className="text-sm">{ticket.owner_name ?? "-"}</TableCell>
-      <TableCell className="text-sm">{formatDate(ticket.actionable_deadline)}</TableCell>
-      <TableCell className="min-w-[170px]">
-        {verdictsAvailable ? (
-          <>
-            <div className={cn("mb-1 flex items-center gap-2 text-sm font-medium", meta.text)}>
-              <span className={cn("size-2 rounded-full", meta.icon)} />
-              <span>{meta.label}</span>
-              <span className="text-muted-foreground">· {formatSlaDelta(ticket.sla_remaining_ms)}</span>
-            </div>
-            <div className="h-1.5 overflow-hidden rounded-full bg-secondary"><div className={cn("h-full rounded-full", meta.bar)} style={{ width: `${ticket.sla_progress}%` }} /></div>
-          </>
-        ) : (
-          <span className="text-sm text-muted-foreground">Unavailable</span>
-        )}
-      </TableCell>
-    </TableRow>
-  );
-}
 
 function BreachLogRow({ ticket, zammadBase }: { ticket: Ticket; zammadBase: string }) {
   const title = zammadBase ? <a className="hover:underline" href={`${zammadBase}/#ticket/zoom/${ticket.zammad_id}`} target="_blank" rel="noreferrer">{ticket.title}</a> : <Link className="hover:underline" to={`/tickets/${ticket.id}`}>{ticket.title}</Link>;
@@ -397,15 +323,6 @@ function Heatmap({ grid, max }: { grid: number[][]; max: number }) {
   );
 }
 
-function emptyText(tab: TabValue) {
-  return tab === "all" ? "Tidak ada tiket dalam scope ini." : `Tidak ada tiket ${tab.replace("_", " ")} dalam scope ini.`;
-}
-
-function formatSlaDelta(ms: number | null) {
-  if (ms == null) return "-";
-  return ms < 0 ? `+${formatMinutes(Math.ceil(Math.abs(ms) / 60000))} lewat` : `${formatMinutes(Math.floor(ms / 60000))} tersisa`;
-}
-
 function formatMinutes(minutes: number | null) {
   if (minutes == null) return "-";
   const hours = Math.floor(minutes / 60);
@@ -415,9 +332,4 @@ function formatMinutes(minutes: number | null) {
 
 function formatDate(value: string | null) {
   return value ? new Date(value).toLocaleString() : "-";
-}
-
-function complianceIcon(rate: number | null) {
-  if (rate == null) return "bg-muted text-muted-foreground";
-  return rate >= 90 ? "bg-emerald-500/15 text-emerald-600" : rate >= 75 ? "bg-amber-500/15 text-amber-600" : "bg-red-500/15 text-red-600";
 }

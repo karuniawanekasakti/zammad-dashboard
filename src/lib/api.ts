@@ -36,6 +36,7 @@ import type {
   OverviewTab,
   ReportExport,
   Role,
+  ManagerMetricsPeriod,
   SettingsBundle,
   SettingsStatus,
   SlaMonitorData,
@@ -44,6 +45,7 @@ import type {
   SyncFreshness,
   SyncSchedules,
   SyncTriggerResult,
+  SlaManagerMetrics,
   SystemSettings,
   Ticket,
   TicketArticle,
@@ -215,6 +217,22 @@ export function buildMockSlaMonitor(rows: Ticket[], now = new Date()): SlaMonito
   const priority_rows = (Object.entries(priorityLabels) as [TicketPriority, string][]).map(([priority, label]) => slaMonitorRow(priority, label, enriched.filter((t) => t.priority === priority)));
   const groups = new Map(enriched.map((t) => [t.group_id || "unknown", t.group_name || "Unknown"]));
   const sla_rows = [...groups].sort((a, b) => a[0].localeCompare(b[0])).map(([id, name]) => slaMonitorRow(id, name, enriched.filter((t) => (t.group_id || "unknown") === id)));
+  // Mock period values exercise each state of the manager header; the real API
+  // computes these windows from synchronized tickets.
+  const trendByPeriod: Record<ManagerMetricsPeriod, number> = { week: 4, month: 2, quarter: -3, year: 6 };
+  const breachesByPeriod: Record<ManagerMetricsPeriod, number> = { week: 6, month: 5, quarter: 3, year: 9 };
+  const avgBreachMinutes = (() => {
+    const missed = closed
+      .flatMap((t) => [t.first_response_diff_in_min, t.update_diff_in_min, t.close_diff_in_min])
+      .filter((value): value is number => value != null && value < 0);
+    return missed.length ? Math.round(Math.abs(missed.reduce((sum, n) => sum + n, 0)) / missed.length) : null;
+  })();
+  const manager_metrics: Record<ManagerMetricsPeriod, SlaManagerMetrics> = {
+    week: { compliance_rate: summary.compliance_rate ?? 100, active_breaches: breachesByPeriod.week, trend_percentage: trendByPeriod.week, average_breach_time_minutes: avgBreachMinutes },
+    month: { compliance_rate: summary.compliance_rate ?? 100, active_breaches: breachesByPeriod.month, trend_percentage: trendByPeriod.month, average_breach_time_minutes: avgBreachMinutes },
+    quarter: { compliance_rate: summary.compliance_rate ?? 100, active_breaches: breachesByPeriod.quarter, trend_percentage: trendByPeriod.quarter, average_breach_time_minutes: avgBreachMinutes },
+    year: { compliance_rate: summary.compliance_rate ?? 100, active_breaches: breachesByPeriod.year, trend_percentage: trendByPeriod.year, average_breach_time_minutes: avgBreachMinutes },
+  };
   return {
     ...summary,
     summary,
@@ -228,6 +246,7 @@ export function buildMockSlaMonitor(rows: Ticket[], now = new Date()): SlaMonito
     tickets: enriched,
     risk_rows: enriched.filter((t) => t.live_sla_status === "breached" || t.live_sla_status === "critical" || t.live_sla_status === "warning"),
     breach_log: breachLog,
+    manager_metrics,
   };
 }
 

@@ -429,6 +429,43 @@ def _avg_minutes(values: list[int | None]) -> int | None:
 def _status_rank(status: str) -> int:
     return {"breached": 0, "critical": 1, "warning": 2, "on_track": 3, "no_sla": 4}.get(status, 5)
 
+def _manager_metrics(tickets: list[TicketOut], now: datetime, period: str) -> dict:
+    days = {"week": 7, "month": 30, "quarter": 90, "year": 365}.get(period, 30)
+    current_start = now - timedelta(days=days)
+    previous_start = current_start - timedelta(days=days)
+
+    def closed_in(start: datetime, end: datetime) -> list[TicketOut]:
+        return [
+            ticket for ticket in tickets
+            if (closed_at := _as_utc(ticket.close_at or ticket.closed_at)) and start <= closed_at < end
+        ]
+
+    def compliance(rows: list[TicketOut]) -> float:
+        monitored = [ticket for ticket in rows if _sla_outcome_diffs(ticket) or _sla_deadline(ticket)]
+        if not monitored:
+            return 0
+        met = len([ticket for ticket in monitored if _effective_sla_status(ticket, now) != "breached"])
+        return met / len(monitored) * 100
+
+    current = closed_in(current_start, now)
+    previous = closed_in(previous_start, current_start)
+    current_rate = compliance(current)
+    breached = [ticket for ticket in tickets if ticket.state in OPEN_STATES and _effective_sla_status(ticket, now) == "breached"]
+    breach_times = [
+        int((deadline - created).total_seconds() / 60)
+        for ticket in current
+        if _effective_sla_status(ticket, now) == "breached"
+        and (deadline := _sla_deadline(ticket))
+        and (created := _as_utc(ticket.zammad_created_at))
+        and deadline >= created
+    ]
+    return {
+        "compliance_rate": current_rate,
+        "active_breaches": len(breached),
+        "trend_percentage": current_rate - compliance(previous),
+        "average_breach_time_minutes": _avg_minutes(breach_times),
+    }
+
 
 def _build_sla_monitor(tickets: list[TicketOut], now: datetime | None = None, groups: list[tuple[str, str]] | None = None) -> dict:
     now = now or datetime.now(timezone.utc)
@@ -501,6 +538,7 @@ def _build_sla_monitor(tickets: list[TicketOut], now: datetime | None = None, gr
         "tickets": rows,
         "risk_rows": [t for t in rows if t["live_sla_status"] in ("breached", "critical", "warning")],
         "breach_log": [ticket_payload(t, now) for t in breach_log],
+        "manager_metrics": {period: _manager_metrics(tickets, now, period) for period in ("week", "month", "quarter", "year")},
     }
 
 

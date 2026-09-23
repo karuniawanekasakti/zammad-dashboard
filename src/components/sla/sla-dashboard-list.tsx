@@ -100,12 +100,10 @@ export function SlaDashboardList({ tickets, scope, groupByAgent, onGroupByAgentC
     if (bucket) bucket.push(ticket);
     else sections.set(key, [ticket]);
   }
-  // Sections inherit their worst ticket's place: the agent with a breach is
-  // read before the agent whose tickets are all on track.
-  const sectionList = [...sections.entries()].sort((a, b) => {
-    const rank = (rows: SlaMonitorTicket[]) => Math.min(...rows.map((row) => URGENCY_RANK[row.live_sla_status] ?? URGENCY_RANK.no_sla));
-    return rank(a[1]) - rank(b[1]) || agentLabel(a[1][0]).localeCompare(agentLabel(b[1][0]));
-  });
+  // Busiest agents first; names make equal-size sections deterministic.
+  const sectionList = [...sections.entries()].sort((a, b) =>
+    b[1].length - a[1].length || agentLabel(a[1][0]).localeCompare(agentLabel(b[1][0])),
+  );
 
   return (
     <section aria-label="SLA dashboard list" className="space-y-4">

@@ -143,8 +143,8 @@ try {
   // --- Group by agent --------------------------------------------------------
   // The collapse state lives in the mounted page, not in the props, so it is
   // only observable on a page that has actually been clicked. What renders
-  // here is the section inventory: every agent gets one, worst first, with
-  // their own tickets beneath.
+  // here is the section inventory: every agent gets one, ordered by ticket
+  // count descending so the busiest users are visible first.
   assert.match(list, /Group by Agent/, "the grouping toggle must render");
   assert.doesNotMatch(list, /aria-expanded/, "the ungrouped list has no sections to expand");
   const grouped = markupFor(createElement(SlaDashboardList, { tickets, scope: null, groupByAgent: true }));
@@ -156,10 +156,9 @@ try {
   const groupedTitles = count(grouped, /<td class="p-3 align-middle font-mono text-xs">/g);
   assert.equal(flatTitles, tickets.length, "the flat list shows every ticket");
   assert.equal(groupedTitles, tickets.length, "the grouped list shows every ticket");
-  // Section order is the order of the agents who appear in it: worst ticket
-  // first (Citra's breach, then Bunga's critical, then Adi's warning).
-  const groupedOrder = positions(grouped, ["Citra Dewi", "Adi Nugroho", "Bunga Sari"]);
-  assert.ok(groupedOrder[0] < groupedOrder[2], "the breaching agent's section leads the list");
+  // Adi and Bunga each own two tickets; Citra owns one. Ties are alphabetical.
+  const groupedOrder = positions(grouped, ["Adi Nugroho", "Bunga Sari", "Citra Dewi"]);
+  assert.ok(groupedOrder[0] < groupedOrder[1] && groupedOrder[1] < groupedOrder[2], "agent sections must be ordered by ticket count descending, then name");
 
   // --- Entry modes -----------------------------------------------------------
   const inline = markupFor(createElement(ManagerMetricsSummary, { monitor, scope: null, mode: "inline" }));

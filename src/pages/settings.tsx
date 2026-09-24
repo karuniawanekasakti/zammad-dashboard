@@ -163,7 +163,7 @@ export default function SettingsPage() {
       <Card>
         <CardContent className="pt-6">
           <QueryBody
-            isLoading={statusPending && settingsPending}
+            isLoading={statusPending}
             isError={statusQuery.isError}
             onRetry={() => {
               void statusQuery.refetch();
@@ -230,74 +230,26 @@ export default function SettingsPage() {
 
         {/* Worker Config */}
         <TabsContent value="worker" className="space-y-4">
-          <QueryBody
-            isLoading={settingsPending}
-            isError={settingsError}
-            onRetry={() => settings.refetch()}
-            label="worker configuration"
-          >
           <Card>
             <CardHeader>
               <CardTitle className="text-base flex items-center gap-2"><Zap className="size-4" /> Celery Beat Schedules</CardTitle>
               <CardDescription>Intervals are stored in the DB and applied on the next beat tick (≤ 60 s).</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              {s && (
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Label>Incremental sync (seconds)</Label>
-                  <Input
-                    type="number"
-                    value={schedules?.incremental_seconds ?? s.schedules.incremental_seconds}
-                    onChange={(e) => setSchedules((current) => ({ ...(current ?? s.schedules), incremental_seconds: parseInt(e.target.value, 10) }))}
-                    min={30}
-                    max={604800}
-                  />
-                  <p className="text-xs text-muted-foreground">Default 300s (5 min). Pulls tickets updated since last watermark.</p>
-                </div>
-                <div className="space-y-2">
-                  <Label>Full reconcile (seconds)</Label>
-                  <Input
-                    type="number"
-                    value={schedules?.full_reconcile_seconds ?? s.schedules.full_reconcile_seconds}
-                    onChange={(e) => setSchedules((current) => ({ ...(current ?? s.schedules), full_reconcile_seconds: parseInt(e.target.value, 10) }))}
-                    min={30}
-                    max={604800}
-                  />
-                  <p className="text-xs text-muted-foreground">Default 21600s (6 h). Re-syncs all tickets, users, groups.</p>
-                </div>
-              </div>
-              )}
-              <Separator />
-              <div className="flex items-center justify-between">
-                <div className="text-sm">
-                  Zammad: <span className="font-medium">{s?.zammad_base_url ?? "—"}</span>
-                </div>
-                <Button
-                  onClick={() => schedules && saveSchedules.mutate(schedules)}
-                  disabled={!schedules || saveSchedules.isPending}
-                >
-                  {saveSchedules.isPending ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
-                  Save Schedules
-                </Button>
-              </div>
+              <QueryBody isLoading={settingsPending} isError={settingsError} onRetry={() => settings.refetch()} label="Celery Beat schedules" className="min-h-40">
+                {s && <><div className="grid gap-4 md:grid-cols-2"><div className="space-y-2"><Label>Incremental sync (seconds)</Label><Input type="number" value={schedules?.incremental_seconds ?? s.schedules.incremental_seconds} onChange={(e) => setSchedules((current) => ({ ...(current ?? s.schedules), incremental_seconds: parseInt(e.target.value, 10) }))} min={30} max={604800} /><p className="text-xs text-muted-foreground">Default 300s (5 min). Pulls tickets updated since last watermark.</p></div><div className="space-y-2"><Label>Full reconcile (seconds)</Label><Input type="number" value={schedules?.full_reconcile_seconds ?? s.schedules.full_reconcile_seconds} onChange={(e) => setSchedules((current) => ({ ...(current ?? s.schedules), full_reconcile_seconds: parseInt(e.target.value, 10) }))} min={30} max={604800} /><p className="text-xs text-muted-foreground">Default 21600s (6 h). Re-syncs all tickets, users, groups.</p></div></div><Separator /><div className="flex items-center justify-between"><div className="text-sm">Zammad: <span className="font-medium">{s.zammad_base_url}</span></div><Button onClick={() => schedules && saveSchedules.mutate(schedules)} disabled={!schedules || saveSchedules.isPending}>{saveSchedules.isPending ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}Save Schedules</Button></div></>}
+              </QueryBody>
             </CardContent>
           </Card>
 
           <Card>
-            <CardHeader>
-              <CardTitle className="text-base flex items-center gap-2"><PlugZap className="size-4" /> Zammad Connection</CardTitle>
-              <CardDescription>Configured via environment variables (read-only here).</CardDescription>
-            </CardHeader>
+            <CardHeader><CardTitle className="text-base flex items-center gap-2"><PlugZap className="size-4" /> Zammad Connection</CardTitle><CardDescription>Configured via environment variables (read-only here).</CardDescription></CardHeader>
             <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label>Base URL</Label>
-                <Input value={s?.zammad_base_url ?? ""} readOnly />
-              </div>
-              <p className="text-xs text-muted-foreground">API token and webhook secret are not displayed.</p>
+              <QueryBody isLoading={settingsPending} isError={settingsError} onRetry={() => settings.refetch()} label="Zammad connection" className="min-h-24">
+                {s && <><div className="space-y-2"><Label>Base URL</Label><Input value={s.zammad_base_url} readOnly /></div><p className="text-xs text-muted-foreground">API token and webhook secret are not displayed.</p></>}
+              </QueryBody>
             </CardContent>
           </Card>
-          </QueryBody>
         </TabsContent>
 
         {/* Sync & Data */}
@@ -421,7 +373,7 @@ export default function SettingsPage() {
             <CardHeader>
               <CardTitle className="text-base flex items-center gap-2"><Server className="size-4" /> System Health</CardTitle>
               <CardDescription>
-                Dependency snapshot {syncStatus?.health.snapshot_at ? formatDistanceToNow(new Date(syncStatus.health.snapshot_at), { addSuffix: true }) : "unavailable"}. Execution refreshes every 2 s during sync; dependency probes are reused for up to 15 s.
+                {statusPending ? "Loading dependency snapshot." : syncStatus?.health.snapshot_at ? `Dependency snapshot ${formatDistanceToNow(new Date(syncStatus.health.snapshot_at), { addSuffix: true })}. Execution refreshes every 2 s during sync; dependency probes are reused for up to 15 s.` : "Dependency snapshot unavailable. Execution refreshes every 2 s during sync; dependency probes are reused for up to 15 s."}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">

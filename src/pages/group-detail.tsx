@@ -26,7 +26,16 @@ export default function GroupDetailPage() {
     enabled: !!id,
   });
 
-  if (isLoading) return <PageLoader />;
+  if (isLoading) {
+    return (
+      <div className="space-y-6">
+        <Button variant="ghost" size="sm" asChild>
+          <Link to="/groups"><ArrowLeft className="size-4" />Back to groups</Link>
+        </Button>
+        <PageLoader label="Loading group…" />
+      </div>
+    );
+  }
   if (isError) {
     return (
       <div className="space-y-6">
@@ -37,7 +46,18 @@ export default function GroupDetailPage() {
       </div>
     );
   }
-  if (!data) return <div className="text-sm text-muted-foreground">Group not found.</div>;
+  // A failed request is not a missing group: the not-found state below is
+  // reached only when the query succeeded with a null result.
+  if (!data) {
+    return (
+      <div className="space-y-6">
+        <Button variant="ghost" size="sm" asChild>
+          <Link to="/groups"><ArrowLeft className="size-4" />Back to groups</Link>
+        </Button>
+        <div className="text-sm text-muted-foreground">Group not found.</div>
+      </div>
+    );
+  }
   const { group, trend } = data;
 
   return (

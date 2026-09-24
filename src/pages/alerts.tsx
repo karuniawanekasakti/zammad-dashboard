@@ -1,11 +1,10 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bell, Pencil, Plus, Trash2 } from "lucide-react";
+import { Bell, Loader2, Pencil, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { PageHeader } from "@/components/page-header";
-import { PageLoader } from "@/components/spinner";
-import { DataError } from "@/components/data-error";
+import { QueryBody } from "@/components/data-error";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -117,8 +116,6 @@ export default function AlertsPage() {
     setOpen(true);
   };
 
-  if (isLoading) return <PageLoader />;
-
   return (
 
     <div className="space-y-4">
@@ -140,9 +137,14 @@ export default function AlertsPage() {
 
       <Card>
         <CardContent className="pt-6">
-          {isError ? (
-            <DataError title="alert rules" detail="GET /alerts/rules" onRetry={() => refetch()} variant="page" />
-          ) : (
+          <QueryBody
+            isLoading={isLoading}
+            isError={isError}
+            isEmpty={(rules ?? []).length === 0}
+            onRetry={() => refetch()}
+            label="alert rules"
+            emptyMessage="No alert rules yet. Create your first one."
+          >
           <Table>
             <TableHeader>
               <TableRow>
@@ -156,13 +158,6 @@ export default function AlertsPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {(rules ?? []).length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={7} className="text-center py-10 text-muted-foreground">
-                    No alert rules yet. Create your first one.
-                  </TableCell>
-                </TableRow>
-              )}
               {(rules ?? []).map((r) => (
                 <TableRow key={r.id}>
                   <TableCell className="font-medium flex items-center gap-2">
@@ -186,6 +181,7 @@ export default function AlertsPage() {
                   <TableCell className="text-center">
                     <Switch
                       checked={r.is_active}
+                      disabled={upsert.isPending && upsert.variables?.id === r.id}
                       onCheckedChange={(v) => upsert.mutate({
                         id: r.id,
                         name: r.name,
@@ -206,15 +202,21 @@ export default function AlertsPage() {
                       variant="ghost"
                       className="text-destructive"
                       onClick={() => del.mutate(r.id)}
+                      disabled={del.isPending && del.variables === r.id}
+                      aria-label={`Delete ${r.name}`}
                     >
-                      <Trash2 className="size-3.5" />
+                      {del.isPending && del.variables === r.id ? (
+                        <Loader2 className="size-3.5 animate-spin" />
+                      ) : (
+                        <Trash2 className="size-3.5" />
+                      )}
                     </Button>
                   </TableCell>
                 </TableRow>
               ))}
             </TableBody>
           </Table>
-          )}
+          </QueryBody>
         </CardContent>
       </Card>
 
@@ -296,7 +298,8 @@ export default function AlertsPage() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
-            <Button onClick={() => upsert.mutate(form)} disabled={!form.name || form.channels.length === 0}>
+            <Button onClick={() => upsert.mutate(form)} disabled={!form.name || form.channels.length === 0 || upsert.isPending}>
+              {upsert.isPending && <Loader2 className="size-4 animate-spin" />}
               Save rule
             </Button>
           </DialogFooter>

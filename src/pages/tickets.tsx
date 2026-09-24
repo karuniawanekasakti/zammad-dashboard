@@ -8,6 +8,7 @@ import { PageHeader } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TicketsTable } from "@/components/tickets/tickets-table";
+import { DataError, QueryBody } from "@/components/data-error";
 import type { DataTableFilter, DataTableSort } from "@/components/data-table/types";
 import type { Ticket, TicketState } from "@/types";
 
@@ -126,25 +127,56 @@ export default function TicketsPage() {
             </TabsList>
           </Tabs>
 
-          <TicketsTable
-            rows={tickets.data?.rows ?? EMPTY_TICKETS}
-            total={tickets.data?.total ?? 0}
-            pagination={pagination}
-            onPaginationChange={setPagination}
-            sorts={sorts}
-            onSortsChange={handleSortsChange}
-            filters={filters}
-            onFiltersChange={handleFiltersChange}
-            search={search}
-            onSearchChange={handleSearchChange}
-            columnVisibility={columnVisibility}
-            onColumnVisibilityChange={setColumnVisibility}
-            groups={groups.data ?? []}
-            agents={agents.data ?? []}
-            isLoading={tickets.isLoading}
-            onView={openTicket}
-            onExport={() => downloadTicketsCsv(tickets.data?.rows ?? EMPTY_TICKETS)}
-          />
+          {(groups.isPending || agents.isPending) && (
+            <div className="grid gap-2 sm:grid-cols-2">
+              {groups.isPending && <QueryBody isLoading isError={false} label="group filter options" className="py-4">{null}</QueryBody>}
+              {agents.isPending && <QueryBody isLoading isError={false} label="agent filter options" className="py-4">{null}</QueryBody>}
+            </div>
+          )}
+
+          {(groups.isError || agents.isError) && (
+            // A failed filter source is not the same as "no options": say so
+            // rather than offering an empty dropdown that looks authoritative.
+            <DataError
+              title="filter options"
+              detail={`${groups.isError ? "Groups" : ""}${groups.isError && agents.isError ? " and " : ""}${agents.isError ? "Agents" : ""} could not be loaded, so their filters are unavailable.`}
+              onRetry={() => {
+                if (groups.isError) groups.refetch();
+                if (agents.isError) agents.refetch();
+              }}
+            />
+          )}
+
+          {groups.isPending || agents.isPending ? null : tickets.isError ? (
+            // A failed list request is not an empty result set: report the
+            // failure instead of letting the table claim no tickets matched.
+            <DataError
+              title="tickets"
+              detail="The list request failed — the filters below have not been applied."
+              onRetry={() => tickets.refetch()}
+              variant="page"
+            />
+          ) : (
+            <TicketsTable
+              rows={tickets.data?.rows ?? EMPTY_TICKETS}
+              total={tickets.data?.total ?? 0}
+              pagination={pagination}
+              onPaginationChange={setPagination}
+              sorts={sorts}
+              onSortsChange={handleSortsChange}
+              filters={filters}
+              onFiltersChange={handleFiltersChange}
+              search={search}
+              onSearchChange={handleSearchChange}
+              columnVisibility={columnVisibility}
+              onColumnVisibilityChange={setColumnVisibility}
+              groups={groups.data ?? []}
+              agents={agents.data ?? []}
+              isLoading={tickets.isLoading}
+              onView={openTicket}
+              onExport={() => downloadTicketsCsv(tickets.data?.rows ?? EMPTY_TICKETS)}
+            />
+          )}
         </CardContent>
       </Card>
     </div>

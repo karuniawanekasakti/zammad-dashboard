@@ -4,8 +4,7 @@ import { Bar, BarChart, ResponsiveContainer } from "recharts";
 import { api } from "@/lib/api";
 import { useScope } from "@/stores/auth";
 import { PageHeader } from "@/components/page-header";
-import { PageLoader } from "@/components/spinner";
-import { DataError } from "@/components/data-error";
+import { QueryBody } from "@/components/data-error";
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatPercent, formatSeconds, formatNumber } from "@/lib/utils";
@@ -16,21 +15,21 @@ export default function GroupsPage() {
     queryKey: ["groups", scope],
     queryFn: () => api.listGroups(scope),
   });
-  if (isLoading) return <PageLoader />;
-  if (isError) {
-    return (
-      <div className="space-y-4">
-        <PageHeader title="Groups" description="Team-level workload and SLA metrics." />
-        <DataError title="groups" detail="GET /groups" onRetry={() => refetch()} variant="page" />
-      </div>
-    );
-  }
+  const groups = data ?? [];
 
   return (
     <div className="space-y-4">
       <PageHeader title="Groups" description="Team-level workload and SLA metrics." />
       <Card>
         <CardContent className="pt-6">
+          <QueryBody
+            isLoading={isLoading}
+            isError={isError}
+            isEmpty={!isLoading && !isError && groups.length === 0}
+            onRetry={() => refetch()}
+            label="groups"
+            emptyMessage="No groups to show."
+          >
           <div className="rounded-md border">
             <Table>
               <TableHeader>
@@ -46,7 +45,7 @@ export default function GroupsPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {(data ?? []).map((s) => (
+                {groups.map((s) => (
                   <TableRow key={s.group.id} className="hover:bg-muted/40">
                     <TableCell>
                       <Link className="font-medium hover:underline" to={`/groups/${s.group.id}`}>
@@ -72,6 +71,7 @@ export default function GroupsPage() {
               </TableBody>
             </Table>
           </div>
+          </QueryBody>
         </CardContent>
       </Card>
     </div>

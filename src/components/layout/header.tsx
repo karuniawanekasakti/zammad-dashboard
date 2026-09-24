@@ -29,12 +29,23 @@ export function Header({ onToggleSidebar }: Props) {
   const user = useAuth((s) => s.user);
   const logout = useAuth((s) => s.logout);
 
-  const { data: notifications = [] } = useQuery({
+  const {
+    data: notifications,
+    isLoading: notificationsLoading,
+    isError: notificationsError,
+    refetch: refetchNotifications,
+  } = useQuery({
     queryKey: ["notifications"],
     queryFn: () => api.listNotifications(),
     refetchInterval: 30_000,
   });
-  const unread = notifications.filter((n) => n.status !== "read").length;
+  // The badge is a claim about unread count: only compute it once the query
+  // has actually resolved. While pending or failed we show a local status
+  // dot instead of silently implying "0 unread".
+  const notificationsResolved = !notificationsLoading && !notificationsError && !!notifications;
+  const unread = notificationsResolved
+    ? notifications!.filter((n) => n.status !== "read").length
+    : 0;
 
   // Simulated WS connection status (always connected in mock)
   const wsOnline = true;
@@ -79,10 +90,32 @@ export function Header({ onToggleSidebar }: Props) {
           aria-label="Notifications"
         >
           <Bell className="size-4" />
-          {unread > 0 && (
-            <span className="absolute -top-0.5 -right-0.5 min-w-4 h-4 px-1 rounded-full bg-destructive text-[10px] font-semibold text-destructive-foreground flex items-center justify-center">
-              {unread > 9 ? "9+" : unread}
-            </span>
+          {notificationsResolved ? (
+            unread > 0 && (
+              <span className="absolute -top-0.5 -right-0.5 min-w-4 h-4 px-1 rounded-full bg-destructive text-[10px] font-semibold text-destructive-foreground flex items-center justify-center">
+                {unread > 9 ? "9+" : unread}
+              </span>
+            )
+          ) : notificationsError ? (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                refetchNotifications();
+              }}
+              title="Couldn't load notifications — retry"
+              aria-label="Couldn't load notifications, retry"
+              className="absolute -top-0.5 -right-0.5 size-4 rounded-full bg-destructive text-destructive-foreground flex items-center justify-center text-[10px] font-bold leading-none"
+            >
+              !
+            </button>
+          ) : (
+            <span
+              className="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-muted-foreground/60 animate-pulse"
+              title="Loading notifications"
+              aria-label="Loading notifications"
+              role="status"
+            />
           )}
         </Button>
 

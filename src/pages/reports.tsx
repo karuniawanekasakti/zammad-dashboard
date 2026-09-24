@@ -5,6 +5,7 @@ import { format, formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { PageHeader } from "@/components/page-header";
+import { QueryBody } from "@/components/data-error";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -110,6 +111,14 @@ export default function ReportsPage() {
             <CardDescription>Reports expire 24h after completion</CardDescription>
           </CardHeader>
           <CardContent>
+            <QueryBody
+              isLoading={exports.isPending}
+              isError={exports.isError}
+              isEmpty={!exports.data?.length}
+              onRetry={() => exports.refetch()}
+              label="export history"
+              emptyMessage="No exports yet."
+            >
             <Table>
               <TableHeader>
                 <TableRow>
@@ -122,13 +131,6 @@ export default function ReportsPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {(exports.data ?? []).length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
-                      No exports yet.
-                    </TableCell>
-                  </TableRow>
-                )}
                 {(exports.data ?? []).map((e) => (
                   <TableRow key={e.id}>
                     <TableCell className="font-medium">
@@ -162,6 +164,7 @@ export default function ReportsPage() {
                 ))}
               </TableBody>
             </Table>
+            </QueryBody>
           </CardContent>
         </Card>
       </div>

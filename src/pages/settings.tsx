@@ -4,9 +4,8 @@ import { Loader2, PlugZap, RefreshCw, Shield, Save, Database, Server, AlertTrian
 import { format, formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
-import { DataError } from "@/components/data-error";
+import { QueryBody } from "@/components/data-error";
 import { PageHeader } from "@/components/page-header";
-import { PageLoader } from "@/components/spinner";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -113,6 +112,9 @@ export default function SettingsPage() {
   // yet is merely loading: treating it as unavailable disabled every trigger
   // and flashed a destructive badge on each page load.
   const statusUnavailable = statusQuery.isError;
+  const settingsPending = settings.isPending;
+  const settingsError = settings.isError;
+  const statusPending = statusQuery.isPending;
   useEffect(() => {
     const operationId = st?.execution?.operation_id ?? null;
     if (previousExecution.current && !operationId) {
@@ -127,31 +129,6 @@ export default function SettingsPage() {
     automaticRequest.current = request.key;
     triggerAutomatic.mutate(request.kind);
   }, [st?.automatic, st?.freshness?.last_success_at, st?.latest_attempt?.operation_id, statusQuery.isSuccess]);
-  if (settings.isError || statusQuery.isError) {
-    return (
-      <div className="space-y-4">
-        <PageHeader title="System Settings" description="Admin-only. Worker config, manual sync, health monitoring." />
-        <DataError
-          title="system settings"
-          detail="Configuration and live status could not be loaded."
-          onRetry={() => {
-            settings.refetch();
-            statusQuery.refetch();
-          }}
-          variant="page"
-        />
-      </div>
-    );
-  }
-  if (settings.isPending || statusQuery.isPending) {
-    return (
-      <div className="space-y-4">
-        <PageHeader title="System Settings" description="Admin-only. Worker config, manual sync, health monitoring." />
-        <PageLoader label="Loading system settings…" />
-      </div>
-    );
-  }
-  if (!s || !st) return null;
   const freshness = syncStatus?.freshness;
   const execution = syncStatus?.execution;
   const latestAttempt = syncStatus?.latest_attempt;
@@ -184,7 +161,17 @@ export default function SettingsPage() {
       <PageHeader title="System Settings" description="Admin-only. Worker config, manual sync, health monitoring." />
 
       <Card>
-        <CardContent className="grid gap-4 pt-6 md:grid-cols-3">
+        <CardContent className="pt-6">
+          <QueryBody
+            isLoading={statusPending && settingsPending}
+            isError={statusQuery.isError}
+            onRetry={() => {
+              void statusQuery.refetch();
+              void settings.refetch();
+            }}
+            label="sync status"
+          >
+        <div className="grid gap-4 md:grid-cols-3">
           <div className="space-y-1">
             <p className="text-xs text-muted-foreground">Data freshness</p>
             <div className="flex items-center gap-2">
@@ -228,7 +215,9 @@ export default function SettingsPage() {
             ) : (
               <p className="text-sm text-muted-foreground">No sync attempt recorded yet.</p>
             )}
-          </div>
+        </div>
+        </div>
+          </QueryBody>
         </CardContent>
       </Card>
 
@@ -241,12 +230,19 @@ export default function SettingsPage() {
 
         {/* Worker Config */}
         <TabsContent value="worker" className="space-y-4">
+          <QueryBody
+            isLoading={settingsPending}
+            isError={settingsError}
+            onRetry={() => settings.refetch()}
+            label="worker configuration"
+          >
           <Card>
             <CardHeader>
               <CardTitle className="text-base flex items-center gap-2"><Zap className="size-4" /> Celery Beat Schedules</CardTitle>
               <CardDescription>Intervals are stored in the DB and applied on the next beat tick (≤ 60 s).</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+              {s && (
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
                   <Label>Incremental sync (seconds)</Label>
@@ -271,6 +267,7 @@ export default function SettingsPage() {
                   <p className="text-xs text-muted-foreground">Default 21600s (6 h). Re-syncs all tickets, users, groups.</p>
                 </div>
               </div>
+              )}
               <Separator />
               <div className="flex items-center justify-between">
                 <div className="text-sm">
@@ -300,6 +297,7 @@ export default function SettingsPage() {
               <p className="text-xs text-muted-foreground">API token and webhook secret are not displayed.</p>
             </CardContent>
           </Card>
+          </QueryBody>
         </TabsContent>
 
         {/* Sync & Data */}
@@ -310,6 +308,12 @@ export default function SettingsPage() {
               <CardDescription>Trigger a sync immediately. Incremental is fast; full reconcile may take minutes.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+              <QueryBody
+                isLoading={statusPending}
+                isError={statusQuery.isError}
+                onRetry={() => statusQuery.refetch()}
+                label="sync status"
+              >
               <div className="flex flex-wrap gap-3">
                 <Button
                   onClick={() => triggerIncremental.mutate()}
@@ -382,6 +386,7 @@ export default function SettingsPage() {
                 </Button>
                 <span className="text-xs text-muted-foreground">Clears tickets:*, agents:*, groups:*, kpi:*</span>
               </div>
+              </QueryBody>
             </CardContent>
           </Card>
 
@@ -391,6 +396,12 @@ export default function SettingsPage() {
               <CardDescription>Rolling window enforced by cleanup worker.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+              <QueryBody
+                isLoading={settingsPending}
+                isError={settingsError}
+                onRetry={() => settings.refetch()}
+                label="data retention settings"
+              >
               <div className="space-y-2">
                 <Label>Retention (days)</Label>
                 <Input type="number" value={s?.data_retention_days ?? 30} readOnly />
@@ -399,6 +410,7 @@ export default function SettingsPage() {
                 <div>Records older than retention are deleted daily at 02:00.</div>
                 <div>Hourly snapshots remain for trend accuracy.</div>
               </div>
+              </QueryBody>
             </CardContent>
           </Card>
         </TabsContent>
@@ -413,6 +425,12 @@ export default function SettingsPage() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+              <QueryBody
+                isLoading={statusPending}
+                isError={statusQuery.isError}
+                onRetry={() => statusQuery.refetch()}
+                label="system health"
+              >
               <div className="grid gap-4 md:grid-cols-3">
                 <div className="flex items-center gap-3 p-3 rounded border">
                   <Database className="size-6 text-muted-foreground" />
@@ -464,6 +482,7 @@ export default function SettingsPage() {
                   Refresh
                 </Button>
               </div>
+              </QueryBody>
             </CardContent>
           </Card>
 
@@ -473,6 +492,12 @@ export default function SettingsPage() {
               <CardDescription>Telemetry from the most recent sync (written after completion).</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+              <QueryBody
+                isLoading={statusPending}
+                isError={statusQuery.isError}
+                onRetry={() => statusQuery.refetch()}
+                label="sync run detail"
+              >
               {latestAttempt ? (
                 <dl className="grid grid-cols-2 gap-4 text-sm">
                   <dt className="text-muted-foreground">Kind</dt>
@@ -507,6 +532,7 @@ export default function SettingsPage() {
               ) : (
                 <p className="text-muted-foreground">No sync run recorded yet.</p>
               )}
+              </QueryBody>
             </CardContent>
           </Card>
         </TabsContent>

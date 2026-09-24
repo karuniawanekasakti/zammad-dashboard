@@ -91,9 +91,12 @@ export default function OverviewPage() {
   const total = data?.total ?? 0;
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
-  // Chart, counts and the table are only authoritative once the primary query
-  // has resolved; until then a zero is a fabrication, not an absence of data.
-  const overviewPending = overview.isLoading;
+  // The chart, the Records header count, the Download button and the Records
+  // table all read the single `overview` query, but each renders its own
+  // pending/error affordance. Until that request resolves a zero or empty
+  // array is a fabrication, not an absence of data, so no region may fall back
+  // to `?? 0` / `?? []` while it is in flight or has failed.
+  const overviewIsError = overview.isError;
   const retryOverview = () => {
     void groups.refetch();
     void agents.refetch();
@@ -151,27 +154,45 @@ export default function OverviewPage() {
             <div className="border-t pt-5 space-y-4">
               <div className="space-y-2">
                 <Label>Group filter</Label>
-                <Select value={groupFilter} onValueChange={(v) => { setGroupFilter(v); setPage(1); }}>
-                  <SelectTrigger><SelectValue placeholder="All groups" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All groups</SelectItem>
-                    {(groups.data ?? []).map((group) => (
-                      <SelectItem key={group.id} value={group.id}>{group.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                {groups.isLoading ? (
+                  <div className="flex h-9 items-center gap-2 text-sm text-muted-foreground" role="status">
+                    <Spinner className="size-4" />
+                    Loading groups…
+                  </div>
+                ) : groups.isError ? (
+                  <DataError title="the group filter" detail="GET /groups?summary=true" onRetry={() => groups.refetch()} />
+                ) : (
+                  <Select value={groupFilter} onValueChange={(v) => { setGroupFilter(v); setPage(1); }}>
+                    <SelectTrigger><SelectValue placeholder="All groups" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All groups</SelectItem>
+                      {(groups.data ?? []).map((group) => (
+                        <SelectItem key={group.id} value={group.id}>{group.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
               </div>
               <div className="space-y-2">
                 <Label>Agent filter</Label>
-                <Select value={agentFilter} onValueChange={(v) => { setAgentFilter(v); setPage(1); }}>
-                  <SelectTrigger><SelectValue placeholder="All agents" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All agents</SelectItem>
-                    {(agents.data ?? []).map((agent) => (
-                      <SelectItem key={agent.id} value={agent.id}>{agent.firstname} {agent.lastname}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                {agents.isLoading ? (
+                  <div className="flex h-9 items-center gap-2 text-sm text-muted-foreground" role="status">
+                    <Spinner className="size-4" />
+                    Loading agents…
+                  </div>
+                ) : agents.isError ? (
+                  <DataError title="the agent filter" detail="GET /agents?summary=true" onRetry={() => agents.refetch()} />
+                ) : (
+                  <Select value={agentFilter} onValueChange={(v) => { setAgentFilter(v); setPage(1); }}>
+                    <SelectTrigger><SelectValue placeholder="All agents" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All agents</SelectItem>
+                      {(agents.data ?? []).map((agent) => (
+                        <SelectItem key={agent.id} value={agent.id}>{agent.firstname} {agent.lastname}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
               </div>
             </div>
           </CardContent>
@@ -197,12 +218,12 @@ export default function OverviewPage() {
             />
           }
         >
-          {overviewPending ? (
-            <div className="flex h-80 items-center justify-center gap-2 text-sm text-muted-foreground">
+          {overview.isLoading ? (
+            <div className="flex h-80 items-center justify-center gap-2 text-sm text-muted-foreground" role="status">
               <Spinner />
               Loading chart…
             </div>
-          ) : overview.isError ? (
+          ) : overviewIsError ? (
             <DataError title="the ticket count chart" detail="Request gagal: GET /overview" onRetry={retryOverview} />
           ) : (
             <div className="h-80">
@@ -237,16 +258,16 @@ export default function OverviewPage() {
           <div>
             <CardTitle className="text-base">Records</CardTitle>
             <CardDescription>
-              {overviewPending
+              {overview.isLoading
                 ? "Counting…"
-                : overview.isError
+                : overviewIsError
                   ? "Count unavailable."
                   : `${formatNumber(tableMetric === "created" ? (data?.totals.created ?? 0) : total)} ${tableMetric} ticket(s) in this view`}
             </CardDescription>
           </div>
-          <Button variant="outline" size="sm" onClick={downloadCsv} disabled={overviewPending || overview.isError || !total}>
+          <Button variant="outline" size="sm" onClick={downloadCsv} disabled={overview.isLoading || overviewIsError || !total}>
             <Download className="size-3.5" />
-            {overviewPending || overview.isError ? "Download records" : `Download ${formatNumber(Math.min(total, EXPORT_SIZE))} record(s)`}
+            {overview.isLoading || overviewIsError ? "Download records" : `Download ${formatNumber(Math.min(total, EXPORT_SIZE))} record(s)`}
           </Button>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -264,7 +285,7 @@ export default function OverviewPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {overviewPending ? (
+                {overview.isLoading ? (
                   <TableRow>
                     <TableCell colSpan={7} className="py-10 text-center text-muted-foreground">
                       <div className="flex items-center justify-center gap-2">
@@ -273,7 +294,7 @@ export default function OverviewPage() {
                       </div>
                     </TableCell>
                   </TableRow>
-                ) : overview.isError ? (
+                ) : overviewIsError ? (
                   <TableRow>
                     <TableCell colSpan={7} className="py-10">
                       <DataError title="the overview records" detail="Request gagal: GET /overview" onRetry={retryOverview} />
@@ -281,28 +302,35 @@ export default function OverviewPage() {
                   </TableRow>
                 ) : rows.length === 0 ? (
                   <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground py-10">No records match this period.</TableCell></TableRow>
-                ) : null}
-                {rows.map((ticket) => (
-                  <TableRow key={ticket.id}>
-                    <TableCell className="font-mono text-xs">#{ticket.number}</TableCell>
-                    <TableCell className="max-w-md truncate font-medium">{ticket.title}</TableCell>
-                    <TableCell><StateBadge state={ticket.state} /></TableCell>
-                    <TableCell><SeverityBadge severity={ticket.severity} label={ticket.severity_label} /></TableCell>
-                    <TableCell>{ticket.group_name}</TableCell>
-                    <TableCell>{ticket.owner_name ?? <span className="text-muted-foreground">Unassigned</span>}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground">{dateFor(ticket, tableMetric)}</TableCell>
-                  </TableRow>
-                ))}
+                ) : (
+                  rows.map((ticket) => (
+                    <TableRow key={ticket.id}>
+                      <TableCell className="font-mono text-xs">#{ticket.number}</TableCell>
+                      <TableCell className="max-w-md truncate font-medium">{ticket.title}</TableCell>
+                      <TableCell><StateBadge state={ticket.state} /></TableCell>
+                      <TableCell><SeverityBadge severity={ticket.severity} label={ticket.severity_label} /></TableCell>
+                      <TableCell>{ticket.group_name}</TableCell>
+                      <TableCell>{ticket.owner_name ?? <span className="text-muted-foreground">Unassigned</span>}</TableCell>
+                      <TableCell className="text-xs text-muted-foreground">{dateFor(ticket, tableMetric)}</TableCell>
+                    </TableRow>
+                  ))
+                )}
               </TableBody>
             </Table>
           </div>
 
           <div className="flex items-center justify-between text-sm text-muted-foreground">
-            <div>Showing {total ? (page - 1) * PAGE_SIZE + 1 : 0}–{Math.min(page * PAGE_SIZE, total)} of {total}</div>
+            <div>
+              {overview.isLoading
+                ? "Counting…"
+                : overviewIsError
+                  ? "Count unavailable."
+                  : `Showing ${total ? (page - 1) * PAGE_SIZE + 1 : 0}–${Math.min(page * PAGE_SIZE, total)} of ${total}`}
+            </div>
             <div className="flex items-center gap-2">
-              <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1}>Previous</Button>
-              <span>Page {page} of {pageCount}</span>
-              <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.min(pageCount, p + 1))} disabled={page >= pageCount}>Next</Button>
+              <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1 || overview.isLoading || overviewIsError}>Previous</Button>
+              <span>{overviewIsError ? "Page —" : `Page ${page} of ${pageCount}`}</span>
+              <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.min(pageCount, p + 1))} disabled={page >= pageCount || overview.isLoading || overviewIsError}>Next</Button>
             </div>
           </div>
         </CardContent>

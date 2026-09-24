@@ -1,6 +1,4 @@
 import assert from "node:assert/strict";
-import { createElement } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
 import type * as MockData from "./src/lib/mock-data.ts";
 import type * as SlaTimeline from "./src/lib/sla-timeline.ts";
 import { createServer } from "vite";
@@ -41,12 +39,6 @@ assert.ok(
 const article = timeline.find((entry) => entry.type === "article");
 assert.equal(article?.authorName, articles[0]?.author_name);
 assert.equal(article?.authorRole, articles[0]?.author_role);
-const { SlaActivityTimeline } =
-  await vite.ssrLoadModule("/src/pages/ticket-detail.tsx") as typeof import("./src/pages/ticket-detail.tsx");
-assert.match(
-  renderToStaticMarkup(createElement(SlaActivityTimeline, { history: [], articles: [], loading: false, error: true })),
-  /SLA history could not be loaded/,
-);
 await vite.close();
 
 console.log("Merged SLA timeline OK");

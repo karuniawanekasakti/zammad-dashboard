@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useMemo, useEffect, useRef, useState, type ReactNode } from "react";
+import { useMemo, useEffect, useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ArrowDownUp, ArrowLeft, AlertTriangle, Bell, ChevronDown, ChevronUp, Clock, FileText, Lock, Mail, MessageSquare, Phone, RefreshCw, RotateCcw, Tag, User } from "lucide-react";
 import { format, formatDistanceToNow } from "date-fns";
@@ -61,7 +61,7 @@ export default function TicketDetailPage() {
     queryFn: () => api.getTicket(id!),
     enabled: !!id,
   });
-  const { data: history = [], isLoading: historyLoading, isError: historyError } = useQuery({
+  const { data: history = [], isLoading: historyLoading, isError: historyError, refetch: historyRefetch } = useQuery({
     queryKey: ["ticket-history", id],
     queryFn: () => api.getTicketHistory(id!),
     enabled: !!id,
@@ -248,7 +248,7 @@ export default function TicketDetailPage() {
               <CardDescription>Complete ticket history and field changes</CardDescription>
             </CardHeader>
             <CardContent>
-              <TicketHistoryTimeline ticket={ticket} articleCount={total} history={history} loading={historyLoading} error={historyError} />
+              <TicketHistoryTimeline ticket={ticket} articleCount={total} history={history} loading={historyLoading} error={historyError} onRetry={() => historyRefetch()} />
             </CardContent>
           </Card>
         </div>
@@ -413,12 +413,14 @@ export function TicketHistoryTimeline({
   history,
   loading,
   error,
+  onRetry,
 }: {
   ticket: Ticket;
   articleCount: number;
   history: TicketHistory[];
   loading: boolean;
   error: boolean;
+  onRetry?: () => void;
 }) {
   const [filter, setFilter] = useState<TimelineFilter>("all");
   const [sortDir, setSortDir] = useState<"desc" | "asc">("desc");
@@ -439,7 +441,7 @@ export function TicketHistoryTimeline({
   if (loading) {
     return <div className="space-y-5">{[0, 1, 2].map((i) => <TimelineSkeleton key={i} />)}</div>;
   }
-  if (error) return <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">History belum bisa dimuat.</div>;
+  if (error) return <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground" role="alert">History belum bisa dimuat.{onRetry && <Button type="button" variant="outline" size="sm" className="ml-3" onClick={onRetry}><RefreshCw className="size-3.5" />Retry</Button>}</div>;
   if (!events.length) return <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">Belum ada history.</div>;
 
   return (

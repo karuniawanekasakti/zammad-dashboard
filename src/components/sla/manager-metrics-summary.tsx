@@ -44,12 +44,13 @@ interface Props {
 // Without a backend rollup we can still state the current window honestly:
 // compliance is read off the live monitor payload, and the trend and average
 // breach time — which need history this build does not fetch — degrade to "no
-// comparison available" instead of inventing a figure.
-function metricsForPeriod(monitor: Props["monitor"], period: ManagerMetricsPeriod): SlaManagerMetrics {
+// comparison available" instead of inventing a figure. A null compliance rate
+// stays null: "0.0%" is a claim about the data, not a neutral absence of it.
+function metricsForPeriod(monitor: Props["monitor"], period: ManagerMetricsPeriod): Omit<SlaManagerMetrics, "compliance_rate"> & { compliance_rate: number | null } {
   const precomputed = monitor.manager_metrics?.[period];
   if (precomputed) return precomputed;
   return {
-    compliance_rate: monitor.compliance_rate ?? 0,
+    compliance_rate: monitor.compliance_rate,
     active_breaches: monitor.breached,
     trend_percentage: 0,
     average_breach_time_minutes: null,
@@ -60,8 +61,9 @@ export function ManagerMetricsSummary({ monitor, scope, period = "month", onPeri
   if (mode === "inline") return null;
 
   const metrics = metricsForPeriod(monitor, period);
+  const complianceRate = metrics.compliance_rate;
   const total = monitor.total_with_sla ?? 0;
-  const met = Math.max(0, Math.round((total * metrics.compliance_rate) / 100));
+  const met = complianceRate == null ? null : Math.max(0, Math.round((total * complianceRate) / 100));
   const trendUp = metrics.trend_percentage > 0;
   const trendDown = metrics.trend_percentage < 0;
   const breachesAlert = metrics.active_breaches >= ACTIVE_BREACH_ALERT_THRESHOLD;
@@ -85,8 +87,8 @@ export function ManagerMetricsSummary({ monitor, scope, period = "month", onPeri
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <KpiCard
           title="Compliance Rate"
-          value={`${metrics.compliance_rate.toFixed(1)}%`}
-          helper={`${met} of ${total} tickets met SLA`}
+          value={complianceRate == null ? "Unavailable" : `${complianceRate.toFixed(1)}%`}
+          helper={complianceRate == null ? "No rollup for this period" : `${met} of ${total} tickets met SLA`}
           icon={CheckCircle2}
         />
         <KpiCard

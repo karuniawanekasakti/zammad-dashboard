@@ -3,8 +3,7 @@ import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Too
 import { api } from "@/lib/api";
 import { useScope } from "@/stores/auth";
 import { PageHeader } from "@/components/page-header";
-import { PageLoader } from "@/components/spinner";
-import { DataError, QueryBody } from "@/components/data-error";
+import { QueryBody } from "@/components/data-error";
 import { Card, CardContent } from "@/components/ui/card";
 import { ChartCard } from "@/components/chart-card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -19,15 +18,6 @@ export default function PerformancePage() {
   const reply = useQuery({ queryKey: ["trend", "reply", 14], queryFn: () => api.firstReplyTrend(14) });
   const res = useQuery({ queryKey: ["trend", "res", 14], queryFn: () => api.resolutionTimeTrend(14) });
 
-  if (agents.isLoading) return <PageLoader />;
-  if (agents.isError) {
-    return (
-      <div className="space-y-4">
-        <PageHeader title="Performance" description="Agent ranking, KPI trends, and comparisons." />
-        <DataError title="performance data" detail="GET /agents" onRetry={() => agents.refetch()} variant="page" />
-      </div>
-    );
-  }
   const ranked = (agents.data ?? []).slice().sort((a, b) => b.closed_this_week - a.closed_this_week).slice(0, 10);
   const chartData = ranked.map((s) => ({
     name: s.agent.firstname,
@@ -104,6 +94,14 @@ export default function PerformancePage() {
 
       <Card>
         <CardContent className="pt-6">
+          <QueryBody
+            isLoading={agents.isLoading}
+            isError={agents.isError}
+            isEmpty={!chartData.length}
+            onRetry={() => agents.refetch()}
+            label="agent ranking"
+            emptyMessage="No agent activity this week."
+          >
           <div className="rounded-md border">
             <Table>
               <TableHeader>
@@ -135,6 +133,7 @@ export default function PerformancePage() {
               </TableBody>
             </Table>
           </div>
+          </QueryBody>
         </CardContent>
       </Card>
     </div>

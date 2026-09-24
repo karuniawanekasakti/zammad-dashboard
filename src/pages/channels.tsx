@@ -1,11 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, Mail, MessageCircle, Send, Slack, TestTube2, XCircle } from "lucide-react";
+import { CheckCircle2, Loader2, Mail, MessageCircle, Send, Slack, TestTube2, XCircle } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { PageHeader } from "@/components/page-header";
-import { DataError } from "@/components/data-error";
-import { PageLoader } from "@/components/spinner";
+import { QueryBody } from "@/components/data-error";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -32,15 +31,18 @@ export default function ChannelsPage() {
     },
   });
 
-  if (isLoading) return <PageLoader />;
-
   return (
     <div className="space-y-4">
       <PageHeader title="Channels" description="Configure where your alerts are delivered." />
 
-      {isError ? (
-        <DataError title="channels" detail="GET /channels" onRetry={() => refetch()} variant="page" />
-      ) : (
+      <QueryBody
+        isLoading={isLoading}
+        isError={isError}
+        isEmpty={!channels?.length}
+        onRetry={() => refetch()}
+        label="channels"
+        emptyMessage="No delivery channels configured yet."
+      >
       <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
         {(channels ?? []).map((c) => {
           const Icon = ICONS[c.channel_type] ?? MessageCircle;
@@ -76,8 +78,17 @@ export default function ChannelsPage() {
                       Not verified
                     </Badge>
                   )}
-                  <Button size="sm" variant="outline" onClick={() => test.mutate(c.id)} disabled={test.isPending}>
-                    <TestTube2 className="size-3.5" />
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => test.mutate(c.id)}
+                    disabled={test.isPending && test.variables === c.id}
+                  >
+                    {test.isPending && test.variables === c.id ? (
+                      <Loader2 className="size-3.5 animate-spin" />
+                    ) : (
+                      <TestTube2 className="size-3.5" />
+                    )}
                     Test
                   </Button>
                 </div>
@@ -86,7 +97,7 @@ export default function ChannelsPage() {
           );
         })}
       </div>
-      )}
+      </QueryBody>
     </div>
   );
 }

@@ -38,7 +38,7 @@ import { fullName } from "@/lib/mock-data";
 import { KpiCard } from "@/components/kpi-card";
 import { PageHeader } from "@/components/page-header";
 import { ChartCard } from "@/components/chart-card";
-import { PageLoader, Spinner } from "@/components/spinner";
+import { Spinner } from "@/components/spinner";
 import { DataError, QueryBody } from "@/components/data-error";
 import type { Group, User } from "@/types";
 import { RoleBadge, SeverityBadge, StateBadge } from "@/components/status-badges";
@@ -207,36 +207,50 @@ function AdminDashboard({ scope, agentFilter, chart }: { scope: ReturnType<typeo
   const notifications = useQuery({ queryKey: ["notifications"], queryFn: () => api.listNotifications() });
   const settings = useQuery({ queryKey: ["dashboard", "system-settings"], queryFn: () => api.getSystemSettings() });
 
+  // Every request owns its own pending/error state: the KPI row, the two
+  // trend charts, the agent table/chart, the alerts feed and the sync-health
+  // strip all load independently, so one slow or failed query must not blank
+  // out the rest of the dashboard.
   const top = (agents.data ?? [])
     .filter((s) => agentFilter === "all" || s.agent.id === agentFilter)
     .slice(0, 6);
   const recent = (notifications.data ?? []).slice(0, 5);
 
-  if (kpi.isLoading) return <PageLoader label="Loading KPIs…" />;
-  if (kpi.isError || !kpi.data) {
-    return <DataError title="admin KPIs" detail="GET /kpi/summary" onRetry={() => kpi.refetch()} variant="page" />;
-  }
+  const kpiData = kpi.data;
 
   return (
     <>
+      {kpi.isLoading ? (
+        <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
+          {[0, 1, 2, 3].map((i) => (
+            <Card key={i} className="h-[104px]">
+              <CardContent className="flex h-full items-center justify-center pt-6">
+                <Spinner className="size-5" />
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      ) : kpi.isError || !kpiData ? (
+        <DataError title="admin KPIs" detail="GET /kpi/summary" onRetry={() => kpi.refetch()} variant="page" />
+      ) : (
       <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
         <KpiCard
           title="Open tickets"
-          value={formatNumber(kpi.data.total_open_tickets)}
-          helper={`${formatNumber(kpi.data.new_today)} new today`}
+          value={formatNumber(kpiData.total_open_tickets)}
+          helper={`${formatNumber(kpiData.new_today)} new today`}
           icon={TicketIcon}
           trend={{ value: 3.2, direction: "down", goodIs: "down" }}
         />
         <KpiCard
           title="Agents online"
-          value={`${kpi.data.agents_online} / ${kpi.data.total_agents}`}
+          value={`${kpiData.agents_online} / ${kpiData.total_agents}`}
           helper="Active in last 15 min"
           icon={UserCheck}
           iconClassName="bg-emerald-500/15 text-emerald-500"
         />
         <KpiCard
           title="SLA breach rate"
-          value={formatPercent(kpi.data.sla_breach_rate)}
+          value={formatPercent(kpiData.sla_breach_rate)}
           helper="Across last 30 days"
           icon={AlertTriangle}
           iconClassName="bg-destructive/15 text-destructive"
@@ -244,13 +258,14 @@ function AdminDashboard({ scope, agentFilter, chart }: { scope: ReturnType<typeo
         />
         <KpiCard
           title="Avg resolution"
-          value={formatSeconds(kpi.data.avg_resolution_secs)}
+          value={formatSeconds(kpiData.avg_resolution_secs)}
           helper="Last 7 days"
           icon={Timer}
           iconClassName="bg-amber-500/15 text-amber-500"
           trend={{ value: 4.8, direction: "up", goodIs: "down" }}
         />
       </div>
+      )}
 
       {chart}
 
@@ -291,7 +306,14 @@ function AdminDashboard({ scope, agentFilter, chart }: { scope: ReturnType<typeo
 
       <div className="grid gap-4 lg:grid-cols-3">
         <ChartCard title="Agent workload" description="Top 6 agents by open tickets" className="lg:col-span-2">
-          <QueryBody isLoading={agents.isLoading} isError={agents.isError} onRetry={() => agents.refetch()} label="agent workload">
+          <QueryBody
+            isLoading={agents.isLoading}
+            isError={agents.isError}
+            isEmpty={!top.length}
+            onRetry={() => agents.refetch()}
+            label="agent workload"
+            emptyMessage="No agent activity in this scope."
+          >
             <Table>
               <TableHeader>
                 <TableRow>
@@ -400,7 +422,8 @@ function TeamLeadDashboard({ scope, agentFilter, chart }: { scope: ReturnType<ty
   const agents = useQuery({ queryKey: ["agents", scope], queryFn: () => api.listAgents(scope) });
   const atRisk = useQuery({ queryKey: ["at_risk", scope], queryFn: () => api.listAtRisk(scope) });
 
-  const workload = (agents.data ?? [])
+  const agentStats = agents.data ?? [];
+  const workload = agentStats
     .filter((s) => agentFilter === "all" || s.agent.id === agentFilter)
     .slice(0, 8)
     .map((s) => ({
@@ -409,47 +432,63 @@ function TeamLeadDashboard({ scope, agentFilter, chart }: { scope: ReturnType<ty
       at_risk: s.at_risk,
       breached: s.breached,
     }));
-
-  if (kpi.isLoading || agents.isLoading) return <PageLoader label="Loading group KPIs…" />;
-  if (kpi.isError || agents.isError || !kpi.data || !agents.data) {
-    return (
-      <DataError
-        title="group KPIs"
-        detail="GET /kpi/summary · GET /agents"
-        onRetry={() => {
-          if (kpi.isError) kpi.refetch();
-          if (agents.isError) agents.refetch();
-        }}
-        variant="page"
-      />
-    );
-  }
+  // Ranked-by-breach table shares the `agents` query, so it owns that query's
+  // pending/error state instead of the whole page doing so.
+  const breached = agentStats
+    .filter((s) => agentFilter === "all" || s.agent.id === agentFilter)
+    .slice()
+    .sort((a, b) => b.breached - a.breached)
+    .slice(0, 5);
+  const kpiData = kpi.data;
 
   return (
     <>
+      {kpi.isLoading ? (
+        <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
+          {[0, 1, 2, 3].map((i) => (
+            <Card key={i} className="h-[104px]">
+              <CardContent className="flex h-full items-center justify-center pt-6">
+                <Spinner className="size-5" />
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      ) : kpi.isError || !kpiData ? (
+        <DataError title="group KPIs" detail="GET /kpi/summary" onRetry={() => kpi.refetch()} variant="page" />
+      ) : (
       <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
-        <KpiCard title="Group open tickets" value={formatNumber(kpi.data.total_open_tickets)} icon={TicketIcon} />
-        <KpiCard title="Agents in group" value={`${agents.data.length}`} helper="Active agents" icon={UsersIcon} />
-        <KpiCard title="Group SLA breach" value={formatPercent(kpi.data.sla_breach_rate)} icon={AlertTriangle} iconClassName="bg-destructive/15 text-destructive" />
-        <KpiCard title="Avg first reply" value={formatSeconds(kpi.data.avg_first_reply_secs)} icon={Clock} />
+        <KpiCard title="Group open tickets" value={formatNumber(kpiData.total_open_tickets)} icon={TicketIcon} />
+        <KpiCard title="Agents in group" value={`${agentStats.length}`} helper="Active agents" icon={UsersIcon} />
+        <KpiCard title="Group SLA breach" value={formatPercent(kpiData.sla_breach_rate)} icon={AlertTriangle} iconClassName="bg-destructive/15 text-destructive" />
+        <KpiCard title="Avg first reply" value={formatSeconds(kpiData.avg_first_reply_secs)} icon={Clock} />
       </div>
+      )}
 
       {chart}
 
       <div className="grid gap-4 lg:grid-cols-2">
         <ChartCard title="Agent workload" description="Open / at-risk / breached per agent">
-          <ResponsiveContainer width="100%" height={260}>
-            <BarChart data={workload}>
-              <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-              <XAxis dataKey="name" tick={{ fontSize: 11 }} />
-              <YAxis tick={{ fontSize: 11 }} />
-              <Tooltip contentStyle={{ background: "hsl(var(--popover))", border: "1px solid hsl(var(--border))", borderRadius: 8 }} />
-              <Legend wrapperStyle={{ fontSize: 11 }} />
-              <Bar dataKey="open" stackId="a" fill="hsl(var(--primary))" />
-              <Bar dataKey="at_risk" stackId="a" fill="hsl(32 95% 50%)" />
-              <Bar dataKey="breached" stackId="a" fill="hsl(0 84% 60%)" />
-            </BarChart>
-          </ResponsiveContainer>
+          <QueryBody
+            isLoading={agents.isLoading}
+            isError={agents.isError}
+            isEmpty={!workload.length}
+            onRetry={() => agents.refetch()}
+            label="agent workload"
+            emptyMessage="No agent activity in this scope."
+          >
+            <ResponsiveContainer width="100%" height={260}>
+              <BarChart data={workload}>
+                <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                <XAxis dataKey="name" tick={{ fontSize: 11 }} />
+                <YAxis tick={{ fontSize: 11 }} />
+                <Tooltip contentStyle={{ background: "hsl(var(--popover))", border: "1px solid hsl(var(--border))", borderRadius: 8 }} />
+                <Legend wrapperStyle={{ fontSize: 11 }} />
+                <Bar dataKey="open" stackId="a" fill="hsl(var(--primary))" />
+                <Bar dataKey="at_risk" stackId="a" fill="hsl(32 95% 50%)" />
+                <Bar dataKey="breached" stackId="a" fill="hsl(0 84% 60%)" />
+              </BarChart>
+            </ResponsiveContainer>
+          </QueryBody>
         </ChartCard>
 
         <ChartCard title="SLA at-risk tickets" description="Closest deadlines first">
@@ -475,23 +514,26 @@ function TeamLeadDashboard({ scope, agentFilter, chart }: { scope: ReturnType<ty
       </div>
 
       <ChartCard title="Top breached this week" description="Agents ranked by breach count">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Agent</TableHead>
-              <TableHead className="text-right">Open</TableHead>
-              <TableHead className="text-right">Breached</TableHead>
-              <TableHead className="text-right">Breach rate</TableHead>
-              <TableHead className="text-right">Avg resolution</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {(agents.data ?? [])
-              .filter((s) => agentFilter === "all" || s.agent.id === agentFilter)
-              .slice()
-              .sort((a, b) => b.breached - a.breached)
-              .slice(0, 5)
-              .map((s) => (
+        <QueryBody
+          isLoading={agents.isLoading}
+          isError={agents.isError}
+          isEmpty={!breached.length}
+          onRetry={() => agents.refetch()}
+          label="top breached agents"
+          emptyMessage="No agent activity in this scope."
+        >
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Agent</TableHead>
+                <TableHead className="text-right">Open</TableHead>
+                <TableHead className="text-right">Breached</TableHead>
+                <TableHead className="text-right">Breach rate</TableHead>
+                <TableHead className="text-right">Avg resolution</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {breached.map((s) => (
                 <TableRow key={s.agent.id}>
                   <TableCell className="flex items-center gap-2">
                     <UserAvatar user={s.agent} size="sm" />
@@ -505,8 +547,9 @@ function TeamLeadDashboard({ scope, agentFilter, chart }: { scope: ReturnType<ty
                   <TableCell className="text-right font-mono">{formatSeconds(s.avg_resolution_secs)}</TableCell>
                 </TableRow>
               ))}
-          </TableBody>
-        </Table>
+            </TableBody>
+          </Table>
+        </QueryBody>
       </ChartCard>
     </>
   );
@@ -521,23 +564,15 @@ function ProjectManagerDashboard({ scope, agentFilter, chart }: { scope: ReturnT
     queryFn: () => api.listTickets(scope, { owner_id: agentFilter, page: 1, page_size: 200 }),
   });
 
-  // The KPIs, tag/severity charts and the state summary are all derived from
-  // these two queries. Rendering them with `?? 0` / `?? []` while a query is
-  // in flight or has failed presents a fabricated zero and an empty chart as
-  // though they were the data.
-  const pending = kpi.isPending || tickets.isPending;
-  const errored = kpi.isError || tickets.isError;
-  const retry = () => {
-    if (kpi.isError) void kpi.refetch();
-    if (tickets.isError) void tickets.refetch();
-  };
+  // The KPI row reads its own `/kpi/summary` query, while the tag, severity
+  // and state-breakdown cards read the `/tickets` query. Each region owns its
+  // query's pending/error state — rendering them with `?? 0` / `?? []` while a
+  // request is in flight or has failed would present a fabricated zero and an
+  // empty chart as though they were real data.
   const rows = tickets.data?.rows ?? [];
-  const isEmpty = !errored && !pending && (tickets.data?.total ?? 0) === 0;
-
-  if (pending) return <PageLoader label="Loading project KPIs…" />;
-  if (errored || !kpi.data || !tickets.data) {
-    return <DataError title="project KPIs" detail="GET /kpi/summary · GET /tickets" onRetry={retry} variant="page" />;
-  }
+  const kpiData = kpi.data;
+  const ticketsData = tickets.data;
+  const ticketsEmpty = !tickets.isPending && !tickets.isError && (ticketsData?.total ?? 0) === 0;
 
   const byTag = (() => {
     const map = new Map<string, number>();
@@ -558,17 +593,39 @@ function ProjectManagerDashboard({ scope, agentFilter, chart }: { scope: ReturnT
 
   return (
     <>
+      {kpi.isPending ? (
+        <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
+          {[0, 1, 2, 3].map((i) => (
+            <Card key={i} className="h-[104px]">
+              <CardContent className="flex h-full items-center justify-center pt-6">
+                <Spinner className="size-5" />
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      ) : kpi.isError || !kpiData ? (
+        <DataError title="project KPIs" detail="GET /kpi/summary" onRetry={() => kpi.refetch()} variant="page" />
+      ) : (
       <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
-        <KpiCard title="Total tickets" value={isEmpty ? "No tickets" : formatNumber(tickets.data.total)} icon={TicketIcon} />
-        <KpiCard title="Resolved today" value={formatNumber(kpi.data.total_closed_today)} icon={CheckCircle2} iconClassName="bg-emerald-500/15 text-emerald-500" />
-        <KpiCard title="SLA breach rate" value={formatPercent(kpi.data.sla_breach_rate)} icon={Gauge} />
-        <KpiCard title="Reopen rate" value={formatPercent(kpi.data.reopen_rate)} icon={RotateCcw} />
+        <KpiCard title="Total tickets" value={tickets.isError || tickets.isPending ? "—" : ticketsEmpty ? "No tickets" : formatNumber(ticketsData?.total ?? 0)} icon={TicketIcon} />
+        <KpiCard title="Resolved today" value={formatNumber(kpiData.total_closed_today)} icon={CheckCircle2} iconClassName="bg-emerald-500/15 text-emerald-500" />
+        <KpiCard title="SLA breach rate" value={formatPercent(kpiData.sla_breach_rate)} icon={Gauge} />
+        <KpiCard title="Reopen rate" value={formatPercent(kpiData.reopen_rate)} icon={RotateCcw} />
       </div>
+      )}
 
       {chart}
 
       <div className="grid gap-4 lg:grid-cols-2">
         <ChartCard title="Tickets by tag" description="Top project/category tags">
+          <QueryBody
+            isLoading={tickets.isPending}
+            isError={tickets.isError}
+            isEmpty={!byTag.length}
+            onRetry={() => tickets.refetch()}
+            label="tickets by tag"
+            emptyMessage="No tagged tickets in this scope."
+          >
           <ResponsiveContainer width="100%" height={260}>
             <PieChart>
               <Pie
@@ -586,9 +643,17 @@ function ProjectManagerDashboard({ scope, agentFilter, chart }: { scope: ReturnT
               <Tooltip contentStyle={{ background: "hsl(var(--popover))", border: "1px solid hsl(var(--border))", borderRadius: 8 }} />
             </PieChart>
           </ResponsiveContainer>
+          </QueryBody>
         </ChartCard>
 
         <ChartCard title="Resolution time trend" description="Avg seconds, last 14 days">
+          <QueryBody
+            isLoading={resTrend.isLoading}
+            isError={resTrend.isError}
+            isEmpty={!resTrend.data?.length}
+            onRetry={() => resTrend.refetch()}
+            label="resolution time trend"
+          >
           <ResponsiveContainer width="100%" height={260}>
             <LineChart data={resTrend.data ?? []}>
               <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
@@ -601,11 +666,20 @@ function ProjectManagerDashboard({ scope, agentFilter, chart }: { scope: ReturnT
               <Line type="monotone" dataKey="value" stroke="hsl(var(--primary))" strokeWidth={2} dot={false} />
             </LineChart>
           </ResponsiveContainer>
+          </QueryBody>
         </ChartCard>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
         <ChartCard title="Severity distribution" description="Active tickets by severity">
+          <QueryBody
+            isLoading={tickets.isPending}
+            isError={tickets.isError}
+            isEmpty={!rows.length}
+            onRetry={() => tickets.refetch()}
+            label="severity distribution"
+            emptyMessage="No tickets in this scope."
+          >
           <ResponsiveContainer width="100%" height={260}>
             <BarChart data={bySeverity}>
               <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
@@ -618,15 +692,25 @@ function ProjectManagerDashboard({ scope, agentFilter, chart }: { scope: ReturnT
               <Bar dataKey="pending" stackId="a" fill="hsl(32 95% 50%)" />
             </BarChart>
           </ResponsiveContainer>
+          </QueryBody>
         </ChartCard>
 
         <ChartCard title="Group ticket summary" description="State breakdown across tickets">
+          <QueryBody
+            isLoading={tickets.isPending}
+            isError={tickets.isError}
+            isEmpty={!rows.length}
+            onRetry={() => tickets.refetch()}
+            label="group ticket summary"
+            emptyMessage="No tickets in this scope."
+          >
           <div className="grid grid-cols-2 gap-3 pt-2">
-            <SummaryStat label="New" value={(tickets.data?.rows ?? []).filter((t) => t.state === "new").length} />
-            <SummaryStat label="Open" value={(tickets.data?.rows ?? []).filter((t) => t.state === "open").length} />
-            <SummaryStat label="Pending" value={(tickets.data?.rows ?? []).filter((t) => t.state === "pending").length} />
+            <SummaryStat label="New" value={rows.filter((t) => t.state === "new").length} />
+            <SummaryStat label="Open" value={rows.filter((t) => t.state === "open").length} />
+            <SummaryStat label="Pending" value={rows.filter((t) => t.state === "pending").length} />
             <SummaryStat label="Closed" value={totalClosed} />
           </div>
+          </QueryBody>
         </ChartCard>
       </div>
     </>
@@ -740,21 +824,33 @@ function AgentDashboard({ scope, userId, chart }: { scope: ReturnType<typeof use
   });
   const reply = useQuery({ queryKey: ["trend", "reply", 7], queryFn: () => api.firstReplyTrend(7) });
   const res = useQuery({ queryKey: ["trend", "res", 7], queryFn: () => api.resolutionTimeTrend(7) });
-  // Both the KPI cards and the open-ticket table read their own query. A
-  // pending or failed request must not render as 0 / "All caught up!".
-  if (kpi.isPending) return <PageLoader label="Loading your KPIs…" />;
-  if (kpi.isError || !kpi.data) {
-    return <DataError title="your KPIs" detail="GET /kpi/summary" onRetry={() => kpi.refetch()} variant="page" />;
-  }
+  // The KPI row, the open-ticket table and the two trends each read their own
+  // query, so each region renders its own pending/error state. A pending or
+  // failed request must not render as 0 / "All caught up!".
+  const kpiData = kpi.data;
 
   return (
     <>
+      {kpi.isPending ? (
+        <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
+          {[0, 1, 2, 3].map((i) => (
+            <Card key={i} className="h-[104px]">
+              <CardContent className="flex h-full items-center justify-center pt-6">
+                <Spinner className="size-5" />
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      ) : kpi.isError || !kpiData ? (
+        <DataError title="your KPIs" detail="GET /kpi/summary" onRetry={() => kpi.refetch()} variant="page" />
+      ) : (
       <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
-        <KpiCard title="My open tickets" value={formatNumber(kpi.data.total_open_tickets)} icon={TicketIcon} />
-        <KpiCard title="My at-risk" value={formatNumber(kpi.data.at_risk)} icon={AlertTriangle} iconClassName="bg-warning/15 text-warning" />
-        <KpiCard title="Avg 1st reply" value={formatSeconds(kpi.data.avg_first_reply_secs)} icon={Clock} />
-        <KpiCard title="Reopen rate" value={formatPercent(kpi.data.reopen_rate)} icon={RotateCcw} />
+        <KpiCard title="My open tickets" value={formatNumber(kpiData.total_open_tickets)} icon={TicketIcon} />
+        <KpiCard title="My at-risk" value={formatNumber(kpiData.at_risk)} icon={AlertTriangle} iconClassName="bg-warning/15 text-warning" />
+        <KpiCard title="Avg 1st reply" value={formatSeconds(kpiData.avg_first_reply_secs)} icon={Clock} />
+        <KpiCard title="Reopen rate" value={formatPercent(kpiData.reopen_rate)} icon={RotateCcw} />
       </div>
+      )}
 
       {chart}
 
@@ -776,22 +872,6 @@ function AgentDashboard({ scope, userId, chart }: { scope: ReturnType<typeof use
               </TableRow>
             </TableHeader>
             <TableBody>
-              {(mine.data?.rows ?? []).map((t) => (
-                <TableRow
-                  key={t.id}
-                  onClick={() => nav(`/tickets/${t.id}`)}
-                  className="cursor-pointer"
-                >
-                  <TableCell className="font-mono">#{t.number}</TableCell>
-                  <TableCell className="max-w-xs truncate">{t.title}</TableCell>
-                  <TableCell><SeverityBadge severity={t.severity} label={t.severity_label} /></TableCell>
-                  <TableCell><SlaBadge status={t.live_sla_status} remainingMs={t.sla_remaining_ms} /></TableCell>
-                  <TableCell><StateBadge state={t.state} /></TableCell>
-                  <TableCell className="text-xs text-muted-foreground">
-                    {formatDistanceToNow(new Date(t.zammad_updated_at), { addSuffix: true })}
-                  </TableCell>
-                </TableRow>
-              ))}
               {mine.isPending ? (
                 <TableRow>
                   <TableCell colSpan={6} className="py-10 text-center text-muted-foreground">
@@ -813,7 +893,24 @@ function AgentDashboard({ scope, userId, chart }: { scope: ReturnType<typeof use
                     All caught up! ✨
                   </TableCell>
                 </TableRow>
-              ) : null}
+              ) : (
+                (mine.data?.rows ?? []).map((t) => (
+                  <TableRow
+                    key={t.id}
+                    onClick={() => nav(`/tickets/${t.id}`)}
+                    className="cursor-pointer"
+                  >
+                    <TableCell className="font-mono">#{t.number}</TableCell>
+                    <TableCell className="max-w-xs truncate">{t.title}</TableCell>
+                    <TableCell><SeverityBadge severity={t.severity} label={t.severity_label} /></TableCell>
+                    <TableCell><SlaBadge status={t.live_sla_status} remainingMs={t.sla_remaining_ms} /></TableCell>
+                    <TableCell><StateBadge state={t.state} /></TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
+                      {formatDistanceToNow(new Date(t.zammad_updated_at), { addSuffix: true })}
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
             </TableBody>
           </Table>
         </CardContent>

@@ -4,8 +4,7 @@ import { AlertTriangle, Clock, Gauge } from "lucide-react";
 import { api } from "@/lib/api";
 import { useScope } from "@/stores/auth";
 import { PageHeader } from "@/components/page-header";
-import { PageLoader } from "@/components/spinner";
-import { DataError } from "@/components/data-error";
+import { QueryBody } from "@/components/data-error";
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
@@ -23,16 +22,8 @@ export default function AgentsPage() {
     queryKey: ["agents", scope],
     queryFn: () => api.listAgents(scope),
   });
-  if (isLoading) return <PageLoader />;
-  if (isError) {
-    return (
-      <div className="space-y-4">
-        <PageHeader title="Agents" description="Workload, SLA and KPI overview per agent." />
-        <DataError title="agents" detail="GET /agents" onRetry={() => refetch()} variant="page" />
-      </div>
-    );
-  }
-  const filtered = (data ?? []).filter((s) => fullName(s.agent).toLowerCase().includes(q.toLowerCase()));
+  const agents = data ?? [];
+  const filtered = agents.filter((s) => fullName(s.agent).toLowerCase().includes(q.toLowerCase()));
 
   return (
     <div className="space-y-4">
@@ -40,6 +31,14 @@ export default function AgentsPage() {
       <Card>
         <CardContent className="pt-6 space-y-4">
           <Input placeholder="Search agents…" value={q} onChange={(e) => setQ(e.target.value)} className="max-w-xs" />
+          <QueryBody
+            isLoading={isLoading}
+            isError={isError}
+            isEmpty={!isLoading && !isError && filtered.length === 0}
+            onRetry={() => refetch()}
+            label="agents"
+            emptyMessage={q ? "No agents match your search." : "No agents to show."}
+          >
           <div className="rounded-md border">
             <Table>
               <TableHeader>
@@ -84,6 +83,7 @@ export default function AgentsPage() {
               </TableBody>
             </Table>
           </div>
+          </QueryBody>
         </CardContent>
       </Card>
     </div>

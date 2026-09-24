@@ -8,6 +8,7 @@ import { parseSlaNavigation, serializeSlaNavigation, type SlaNavigationState } f
 import { useScope } from "@/stores/auth";
 import { PageHeader } from "@/components/page-header";
 import { PageLoader } from "@/components/spinner";
+import { DataError } from "@/components/data-error";
 import { ChartCard } from "@/components/chart-card";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -81,12 +82,12 @@ export default function SlaPage() {
     return (
       <div className="space-y-4">
         <PageHeader title="SLA Monitor" description="Real-time SLA compliance and breach monitoring." />
-        <Card>
-          <CardContent className="space-y-2 py-10 text-center">
-            <div className="font-medium text-destructive">Failed to load SLA monitor data.</div>
-            <div className="text-sm text-muted-foreground">Request gagal: GET /tickets/sla-monitor</div>
-          </CardContent>
-        </Card>
+        <DataError
+          title="SLA monitor data"
+          detail="Request gagal: GET /tickets/sla-monitor"
+          onRetry={() => monitor.refetch()}
+          variant="page"
+        />
       </div>
     );
   }
@@ -111,16 +112,26 @@ export default function SlaPage() {
         </Card>
       )}
 
+      {verdictsAvailable && config.isError && (
+        // Without the base URL the breach log's ticket links point internally
+        // instead of at Zammad — say so rather than letting it look intentional.
+        <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground" role="alert">
+          <span>Zammad base URL could not be loaded, so ticket links open inside this dashboard.</span>
+          <Button variant="outline" size="sm" onClick={() => config.refetch()}>Retry</Button>
+        </div>
+      )}
+
       <Card>
         <CardContent className="flex flex-wrap items-center gap-3 py-4">
-          <span className="text-sm font-medium">Group</span>
-          <Select value={navigation.group} onValueChange={(value) => setNavigation({ group: value, page: 0 })}>
+          <Select value={navigation.group} onValueChange={(value) => setNavigation({ group: value, page: 0 })} disabled={groups.isError}>
             <SelectTrigger className="w-[220px]"><SelectValue placeholder="All groups" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All groups</SelectItem>
               {(groups.data ?? []).map((g) => <SelectItem key={g.id} value={g.id}>{g.name}</SelectItem>)}
             </SelectContent>
           </Select>
+          {groups.isLoading && <span className="text-xs text-muted-foreground">Loading groups…</span>}
+          {groups.isError && <span className="text-xs text-destructive" role="alert">Groups could not be loaded, so this filter is unavailable.</span>}
         </CardContent>
       </Card>
 

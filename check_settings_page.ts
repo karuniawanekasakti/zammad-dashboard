@@ -20,7 +20,7 @@ try {
   );
 
   const pending = render(new QueryClient());
-  assert.match(pending, /Loading system settings/);
+  assert.ok((pending.match(/aria-label="Loading"/g) ?? []).length >= 2, "independent settings regions show their own loading indicators");
   assert.doesNotMatch(pending, /Never Synced|Idle|No sync attempt recorded yet|No sync run recorded yet|300|21600/);
 
   const queryClient = new QueryClient();

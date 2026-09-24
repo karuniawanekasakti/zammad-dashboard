@@ -25,7 +25,16 @@ export default function AgentDetailPage() {
   const reply = useQuery({ queryKey: ["trend", "reply", 14], queryFn: () => api.firstReplyTrend(14) });
   const res = useQuery({ queryKey: ["trend", "res", 14], queryFn: () => api.resolutionTimeTrend(14) });
 
-  if (isLoading) return <PageLoader />;
+  if (isLoading) {
+    return (
+      <div className="space-y-6">
+        <Button variant="ghost" size="sm" asChild>
+          <Link to="/agents"><ArrowLeft className="size-4" />Back to agents</Link>
+        </Button>
+        <PageLoader label="Loading agent…" />
+      </div>
+    );
+  }
   if (isError) {
     return (
       <div className="space-y-6">
@@ -36,7 +45,18 @@ export default function AgentDetailPage() {
       </div>
     );
   }
-  if (!data) return <div className="text-sm text-muted-foreground">Agent not found.</div>;
+  // A failed request is not a missing agent: the not-found state below is
+  // reached only when the query succeeded with a null result.
+  if (!data) {
+    return (
+      <div className="space-y-6">
+        <Button variant="ghost" size="sm" asChild>
+          <Link to="/agents"><ArrowLeft className="size-4" />Back to agents</Link>
+        </Button>
+        <div className="text-sm text-muted-foreground">Agent not found.</div>
+      </div>
+    );
+  }
 
   const { agent } = data;
   return (

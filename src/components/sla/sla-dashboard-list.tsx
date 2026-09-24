@@ -25,7 +25,7 @@ const STATUS_META: Record<SlaStatus, { label: string; text: string; dot: string 
   warning: { label: "Warning", text: "text-amber-600 dark:text-amber-400", dot: "bg-amber-500" },
   on_track: { label: "On Track", text: "text-emerald-600 dark:text-emerald-400", dot: "bg-emerald-500" },
   safe: { label: "Safe", text: "text-emerald-600 dark:text-emerald-400", dot: "bg-emerald-500" },
-  no_sla: { label: "No SLA", text: "text-muted-foreground", dot: "bg-muted-foreground" },
+  no_sla: { label: "No active SLA deadline", text: "text-muted-foreground", dot: "bg-muted-foreground" },
   closed_on_time: { label: "Closed On Time", text: "text-muted-foreground", dot: "bg-muted" },
 };
 

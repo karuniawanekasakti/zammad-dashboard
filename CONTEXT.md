@@ -42,7 +42,7 @@ been reopened.
 
 **Authorized scope** is the ticket population the signed-in role may access before any dashboard filter is applied: administrators see all synchronized tickets, agents see their own tickets, and team leads or project managers see tickets in their assigned groups.
 
-An **active ticket** is currently `new`, `open`, or `pending`. A **monitored ticket** is an active ticket with an actionable SLA deadline. An active ticket without one is **Unmonitored** (`no_sla`).
+An **active ticket** is currently `new`, `open`, or `pending`. A **monitored ticket** is an active ticket with an actionable SLA deadline. An active ticket without one is labeled **No active SLA deadline** (`no_sla`).
 
 A ticket's **live SLA status** is its SLA verdict evaluated from the ticket's own current facts and the present moment. It is the only authoritative verdict, and it is the one every surface shows.
 _Avoid_: current status, real-time status

@@ -42,7 +42,7 @@ export function MilestoneProgressBar({ label, history, deadline, now, status, pr
       <div className="flex items-center justify-between text-xs font-medium">
         <span className={cn("flex items-center gap-1.5", STATUS_STYLES[status].text)}>
           <Clock className="size-3.5" />
-          {label}: {deadline ? `${Math.max(0, Math.round(progressPct))}%` : "Unmonitored"}
+          {label}: {deadline ? `${Math.max(0, Math.round(progressPct))}%` : "No active deadline"}
         </span>
         {hasPause && <span className="flex items-center gap-1 text-muted-foreground"><Pause className="size-3" /> Paused</span>}
       </div>

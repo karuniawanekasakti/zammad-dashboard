@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { buildSlaSegments } from "./src/lib/sla-progress.ts";
-import type { TicketHistory } from "./src/types/index.ts";
+import { buildSlaSegments } from "../../src/lib/sla-progress.ts";
+import type { TicketHistory } from "../../src/types/index.ts";
 
 const start = new Date("2026-09-21T08:00:00Z");
 const current = new Date("2026-09-21T12:00:00Z");

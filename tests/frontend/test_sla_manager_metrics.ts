@@ -3,8 +3,8 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
 import { createServer } from "vite";
-import type { SlaMonitorData, SlaMonitorTicket, Ticket } from "./src/types/index.ts";
-import type * as SlaPageModule from "./src/pages/sla.tsx";
+import type { SlaMonitorData, SlaMonitorTicket, Ticket } from "../../src/types/index.ts";
+import type * as SlaPageModule from "../../src/pages/sla.tsx";
 
 // Issue #42. A manager opening the SLA detail page sees a metrics header
 // (compliance rate, active breaches, trend vs the previous period, average
@@ -83,8 +83,8 @@ const positions = (html: string, needles: string[]) => needles.map((needle) => {
 
 const vite = await createServer({ server: { middlewareMode: true }, appType: "custom" });
 try {
-  const { ManagerMetricsSummary } = await vite.ssrLoadModule("/src/components/sla/manager-metrics-summary.tsx") as typeof import("./src/components/sla/manager-metrics-summary.tsx");
-  const { SlaDashboardList } = await vite.ssrLoadModule("/src/components/sla/sla-dashboard-list.tsx") as typeof import("./src/components/sla/sla-dashboard-list.tsx");
+  const { ManagerMetricsSummary } = await vite.ssrLoadModule("/src/components/sla/manager-metrics-summary.tsx") as typeof import("../../src/components/sla/manager-metrics-summary.tsx");
+  const { SlaDashboardList } = await vite.ssrLoadModule("/src/components/sla/sla-dashboard-list.tsx") as typeof import("../../src/components/sla/sla-dashboard-list.tsx");
   const { severityMonitorRows } = await vite.ssrLoadModule("/src/pages/sla.tsx") as typeof SlaPageModule;
 
   // --- Manager metrics header ------------------------------------------------

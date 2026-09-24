@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createServer } from "vite";
-import type { TicketArticle } from "./src/types/index.ts";
+import type { TicketArticle } from "../../src/types/index.ts";
 
 const article = (id: string): TicketArticle => ({
   id,
@@ -20,9 +20,9 @@ const articles = Array.from({ length: 85 }, (_, index) => article(String(index +
 const vite = await createServer({ server: { middlewareMode: true }, appType: "custom" });
 try {
   const { appendArticlePage, VirtualizedArticleList } =
-    await vite.ssrLoadModule("/src/components/tickets/virtualized-article-list.tsx") as typeof import("./src/components/tickets/virtualized-article-list.tsx");
+    await vite.ssrLoadModule("/src/components/tickets/virtualized-article-list.tsx") as typeof import("../../src/components/tickets/virtualized-article-list.tsx");
   const { ARTICLE_PAGE_SIZE } =
-    await vite.ssrLoadModule("/src/lib/article-pagination.ts") as typeof import("./src/lib/article-pagination.ts");
+    await vite.ssrLoadModule("/src/lib/article-pagination.ts") as typeof import("../../src/lib/article-pagination.ts");
 
   assert.equal(ARTICLE_PAGE_SIZE, 20);
 

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createServer } from "vite";
-import type { TicketHistory } from "./src/types/index.ts";
+import type { TicketHistory } from "../../src/types/index.ts";
 
 // "Load More" pagination: a ticket detail page shows at most
 // TICKET_HISTORY_GROUPS_PER_PAGE history groups (one timestamped card per
@@ -41,7 +41,7 @@ const ticket = {
 const vite = await createServer({ server: { middlewareMode: true }, appType: "custom" });
 try {
   const { TICKET_HISTORY_GROUPS_PER_PAGE, TicketHistoryTimeline } =
-    await vite.ssrLoadModule("/src/pages/ticket-detail.tsx") as typeof import("./src/pages/ticket-detail.tsx");
+    await vite.ssrLoadModule("/src/pages/ticket-detail.tsx") as typeof import("../../src/pages/ticket-detail.tsx");
 
   const markup = (history: TicketHistory[]) =>
     renderToStaticMarkup(

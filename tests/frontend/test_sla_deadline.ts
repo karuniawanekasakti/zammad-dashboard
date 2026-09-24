@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createServer } from "vite";
-import { slaDeadline, slaProgress, slaRemainingMs, slaStatus, slaVerdictsAvailable } from "./src/lib/sla-deadline.ts";
-import type { Ticket } from "./src/types/index.ts";
+import { slaDeadline, slaProgress, slaRemainingMs, slaStatus, slaVerdictsAvailable } from "../../src/lib/sla-deadline.ts";
+import type { Ticket } from "../../src/types/index.ts";
 
 const current = "2026-09-08T12:00:00.000Z";
 const staleResponse = "2026-09-08T06:00:00.000Z";
@@ -97,8 +97,8 @@ assert.equal(slaVerdictsAvailable(null), false);
 assert.equal(slaVerdictsAvailable(undefined), false);
 
 const vite = await createServer({ server: { middlewareMode: true }, appType: "custom" });
-const { buildMockSlaMonitor } = await vite.ssrLoadModule("/src/lib/api.ts") as typeof import("./src/lib/api.ts");
-const { liveTickets, tickets } = await vite.ssrLoadModule("/src/lib/mock-data.ts") as typeof import("./src/lib/mock-data.ts");
+const { buildMockSlaMonitor } = await vite.ssrLoadModule("/src/lib/api.ts") as typeof import("../../src/lib/api.ts");
+const { liveTickets, tickets } = await vite.ssrLoadModule("/src/lib/mock-data.ts") as typeof import("../../src/lib/mock-data.ts");
 const changingTicket = tickets.find((row) => row.state !== "closed" && row.state !== "merged");
 assert.ok(changingTicket);
 changingTicket.first_response_breached = false;

@@ -18,8 +18,8 @@ import { createServer } from "vite";
 
 const vite = await createServer({ server: { middlewareMode: true }, appType: "custom" });
 try {
-  const { default: OverviewPage } = await vite.ssrLoadModule("/src/pages/overview.tsx") as typeof import("./src/pages/overview.tsx");
-  const { default: TicketsPage } = await vite.ssrLoadModule("/src/pages/tickets.tsx") as typeof import("./src/pages/tickets.tsx");
+  const { default: OverviewPage } = await vite.ssrLoadModule("/src/pages/overview.tsx") as typeof import("../../src/pages/overview.tsx");
+  const { default: TicketsPage } = await vite.ssrLoadModule("/src/pages/tickets.tsx") as typeof import("../../src/pages/tickets.tsx");
 
   const render = (page: ComponentType, client = new QueryClient()) =>
     renderToString(

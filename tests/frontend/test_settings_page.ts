@@ -6,7 +6,7 @@ import { createServer } from "vite";
 
 const vite = await createServer({ server: { middlewareMode: true }, appType: "custom" });
 try {
-  const { automaticSyncRequest, default: SettingsPage } = await vite.ssrLoadModule("/src/pages/settings.tsx") as typeof import("./src/pages/settings.tsx");
+  const { automaticSyncRequest, default: SettingsPage } = await vite.ssrLoadModule("/src/pages/settings.tsx") as typeof import("../../src/pages/settings.tsx");
 
   assert.equal(automaticSyncRequest(undefined, null), null);
   assert.equal(automaticSyncRequest({ automatic: { eligible: true, required_kind: "full", blockers: [], next_eligible_at: null } }, null), null);

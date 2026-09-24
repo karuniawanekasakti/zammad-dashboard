@@ -4,18 +4,18 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { createServer } from "vite";
-import type { TicketArticle, TicketHistory } from "./src/types/index.ts";
+import type { TicketArticle, TicketHistory } from "../../src/types/index.ts";
 
 process.env.VITE_USE_MOCK = "true";
 const vite = await createServer({ server: { middlewareMode: true }, appType: "custom" });
 try {
-  const { buildMockSlaMonitor } = await vite.ssrLoadModule("/src/lib/api.ts") as typeof import("./src/lib/api.ts");
-  const { liveTickets } = await vite.ssrLoadModule("/src/lib/mock-data.ts") as typeof import("./src/lib/mock-data.ts");
-  const { default: SlaDetailPage } = await vite.ssrLoadModule("/src/pages/sla-detail.tsx") as typeof import("./src/pages/sla-detail.tsx");
-  const { mergeEventsAndArticles } = await vite.ssrLoadModule("/src/lib/sla-timeline.ts") as typeof import("./src/lib/sla-timeline.ts");
-  const { SlaProgressBar } = await vite.ssrLoadModule("/src/components/milestone-progress-bar.tsx") as typeof import("./src/components/milestone-progress-bar.tsx");
-  const { VirtualizedArticleList } = await vite.ssrLoadModule("/src/components/tickets/virtualized-article-list.tsx") as typeof import("./src/components/tickets/virtualized-article-list.tsx");
-  const { ARTICLE_PAGE_SIZE } = await vite.ssrLoadModule("/src/lib/article-pagination.ts") as typeof import("./src/lib/article-pagination.ts");
+  const { buildMockSlaMonitor } = await vite.ssrLoadModule("/src/lib/api.ts") as typeof import("../../src/lib/api.ts");
+  const { liveTickets } = await vite.ssrLoadModule("/src/lib/mock-data.ts") as typeof import("../../src/lib/mock-data.ts");
+  const { default: SlaDetailPage } = await vite.ssrLoadModule("/src/pages/sla-detail.tsx") as typeof import("../../src/pages/sla-detail.tsx");
+  const { mergeEventsAndArticles } = await vite.ssrLoadModule("/src/lib/sla-timeline.ts") as typeof import("../../src/lib/sla-timeline.ts");
+  const { SlaProgressBar } = await vite.ssrLoadModule("/src/components/milestone-progress-bar.tsx") as typeof import("../../src/components/milestone-progress-bar.tsx");
+  const { VirtualizedArticleList } = await vite.ssrLoadModule("/src/components/tickets/virtualized-article-list.tsx") as typeof import("../../src/components/tickets/virtualized-article-list.tsx");
+  const { ARTICLE_PAGE_SIZE } = await vite.ssrLoadModule("/src/lib/article-pagination.ts") as typeof import("../../src/lib/article-pagination.ts");
 
   const history = [
     { id: "start", type: "sla_start", title: "Resolution", created_at: "2026-01-01T09:00:00Z" },
@@ -56,12 +56,11 @@ try {
   assert.match(detail, /Current status and explanation will return after a successful synchronization/);
 
   // Both milestones render independently, and a stale dataset exposes no
-  // computed verdict on either bar: the bars degrade to "Unmonitored" rather
-  // than reporting a percentage the sync cannot vouch for.
+  // computed percentage on either bar.
   assert.match(detail, /First Response SLA progress/);
   assert.match(detail, /Resolution SLA progress/);
-  assert.match(detail, /First Response: Unmonitored/);
-  assert.match(detail, /Resolution: Unmonitored/);
+  assert.match(detail, /First Response: No active deadline/);
+  assert.match(detail, /Resolution: No active deadline/);
   assert.doesNotMatch(detail, /First Response: \d+%/);
   assert.doesNotMatch(detail, /Resolution: \d+%/);
 

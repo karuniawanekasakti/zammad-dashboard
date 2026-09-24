@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import type * as MockData from "./src/lib/mock-data.ts";
-import type * as SlaTimeline from "./src/lib/sla-timeline.ts";
+import type * as MockData from "../../src/lib/mock-data.ts";
+import type * as SlaTimeline from "../../src/lib/sla-timeline.ts";
 import { createServer } from "vite";
 
 const vite = await createServer({ server: { middlewareMode: true }, appType: "custom" });

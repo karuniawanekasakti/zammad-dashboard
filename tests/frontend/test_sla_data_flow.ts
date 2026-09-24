@@ -4,8 +4,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { createServer } from "vite";
-import type * as ApiModule from "./src/lib/api.ts";
-import type * as SlaDetailModule from "./src/pages/sla-detail.tsx";
+import type * as ApiModule from "../../src/lib/api.ts";
+import type * as SlaDetailModule from "../../src/pages/sla-detail.tsx";
 
 process.env.VITE_USE_MOCK = "true";
 const vite = await createServer({ server: { middlewareMode: true }, appType: "custom" });

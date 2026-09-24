@@ -4,12 +4,12 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
 import { createServer } from "vite";
 
-import type * as InlinePanelModule from "./src/components/sla/inline-sla-panel.tsx";
-import type * as SlaBadgeModule from "./src/components/sla-badge.tsx";
-import type * as SlaDashboardListModule from "./src/components/sla/sla-dashboard-list.tsx";
-import type * as SlaNavigationModule from "./src/lib/sla-navigation.ts";
-import type * as SlaPageModule from "./src/pages/sla.tsx";
-import type { SlaMonitorTicket } from "./src/types/index.ts";
+import type * as InlinePanelModule from "../../src/components/sla/inline-sla-panel.tsx";
+import type * as SlaBadgeModule from "../../src/components/sla-badge.tsx";
+import type * as SlaDashboardListModule from "../../src/components/sla/sla-dashboard-list.tsx";
+import type * as SlaNavigationModule from "../../src/lib/sla-navigation.ts";
+import type * as SlaPageModule from "../../src/pages/sla.tsx";
+import type { SlaMonitorTicket } from "../../src/types/index.ts";
 
 // Opening a ticket from the /sla dashboard must not throw away the filters the
 // manager is looking through, and the inline detail panel must behave like a

@@ -3,7 +3,7 @@ import { createElement } from "react";
 import { renderToString } from "react-dom/server";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createServer } from "vite";
-import type { Ticket } from "./src/types/index.ts";
+import type { Ticket } from "../../src/types/index.ts";
 
 // The Overview records table reports a ticket's Severity (the Zammad
 // `priority_case` custom field, e.g. "P1 - Critical"), not its Zammad
@@ -53,7 +53,7 @@ const ticket = (overrides: Partial<Ticket>): Ticket => ({
 const vite = await createServer({ server: { middlewareMode: true }, appType: "custom" });
 try {
   const { default: OverviewPage, EXPORT_HEADERS, csvRow } =
-    await vite.ssrLoadModule("/src/pages/overview.tsx") as typeof import("./src/pages/overview.tsx");
+    await vite.ssrLoadModule("/src/pages/overview.tsx") as typeof import("../../src/pages/overview.tsx");
 
   const render = (rows: Ticket[]) => {
     const queryClient = new QueryClient();

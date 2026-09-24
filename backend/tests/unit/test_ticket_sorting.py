@@ -4,7 +4,7 @@ Fabricates three TicketOut rows, monkeypatches the router's scoped fetch,
 calls list_tickets directly, and asserts the default sort order (most
 recently updated first).
 
-Run inside the api container or the backend venv: python check_ticket_sorting.py
+Run from backend/: .venv/bin/python tests/run.py unit/test_ticket_sorting.py
 """
 from __future__ import annotations
 

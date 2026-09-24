@@ -13,7 +13,7 @@ start of its ticket fetch (minus the overlap), so a ticket changed during its
 long history phase is not skipped by the next run. See
 docs/adr/0004-full-reconcile-watermark-anchor.md.
 
-Run inside the api container or backend venv: python check_sync_telemetry.py
+Run from backend/: .venv/bin/python tests/run.py unit/test_sync_telemetry.py
 """
 import asyncio
 from datetime import datetime, timedelta, timezone

@@ -1,6 +1,6 @@
 """Check truthful sync freshness through the Settings API boundary.
 
-Run inside the api container or the backend venv: python check_settings_freshness.py
+Run from backend/: .venv/bin/python tests/run.py unit/test_settings_freshness.py
 """
 import asyncio
 from datetime import datetime, timedelta, timezone

@@ -1,6 +1,6 @@
 """Check automatic sync eligibility through the Settings API boundary.
 
-Run inside the api container or backend venv: python check_settings_automatic.py
+Run from backend/: .venv/bin/python tests/run.py unit/test_settings_automatic.py
 """
 import asyncio
 import json

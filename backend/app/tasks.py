@@ -1,7 +1,7 @@
 """Celery tasks: periodic Zammad -> PostgreSQL sync.
 
 Async core (run_incremental_sync / run_full_sync / sync_ticket_core) is shared with
-FastAPI routers and the check_sync.py self-check. Celery tasks are thin sync wrappers
+FastAPI routers and the integration sync test. Celery tasks are thin sync wrappers
 calling asyncio.run(). Each run creates its OWN engine + Redis client bound to that
 run's event loop, then disposes them — asyncpg/redis clients are loop-bound, so a
 module-level pool shared across asyncio.run() invocations would leak across loops.

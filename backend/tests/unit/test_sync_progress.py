@@ -1,6 +1,6 @@
 """Check truthful progress and probe snapshots through stable boundaries.
 
-Run inside the api container or backend venv: python check_sync_progress.py
+Run from backend/: .venv/bin/python tests/run.py unit/test_sync_progress.py
 """
 import asyncio
 import threading

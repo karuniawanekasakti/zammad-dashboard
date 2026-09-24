@@ -25,8 +25,8 @@ against real rows: the detail path and the SLA Monitor agree on verdict and
 countdown, a closed ticket is not active, and its breach evidence states the
 real magnitude.
 
-Run inside the api container (needs live DB + Zammad), after any Full Reconcile
-has completed: python check_sla_staleness.py
+Run inside the api container (needs live DB + Zammad), after any Full Reconcile:
+python tests/run.py integration/test_sla_staleness.py
 
 Exit status is non-zero when a bound is violated, so a future silent stall fails
 this check rather than being discovered by a user.

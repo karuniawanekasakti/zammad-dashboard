@@ -1,6 +1,6 @@
 """Check shared sync ownership and Settings API behavior.
 
-Run inside the api container or backend venv: python check_sync_operation.py
+Run from backend/: .venv/bin/python tests/run.py unit/test_sync_operation.py
 """
 import asyncio
 import json

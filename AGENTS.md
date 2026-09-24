@@ -81,26 +81,15 @@ The `backend/.venv` already has all deps installed (Python 3.12). Point env vars
 
 ### Self-checks (no test framework installed)
 
-The backend has no pytest/unittest; verification is via runnable scripts and assert-based checks. Run inside the api container (needs live DB + Zammad):
+The backend uses stdlib assert-based tests; no pytest/unittest dependency is installed. Tests are split by service boundary:
 
-```bash
-docker compose exec api python check_sync.py            # full sync + verifies DB counts > 0
-docker compose exec api python check_ticket_sorting.py  # monkeypatches tickets.py, asserts list order
-docker compose exec api python check_sync_telemetry.py  # sync summary: watermark, source, duration
-docker compose exec api python check_sla_staleness.py   # dataset staleness bounds + one verdict per ticket
-```
+- `backend/tests/unit/` — deterministic, offline checks. Run all with `cd backend && .venv/bin/python tests/run.py`.
+- `backend/tests/integration/` — live PostgreSQL/Zammad checks. Run explicitly with `docker compose exec api python tests/run.py integration`; these may mutate synchronized data and are not part of the default suite.
+- Run one check from `backend/`, for example `.venv/bin/python tests/run.py unit/test_ticket_sorting.py`.
 
-`check_sync_telemetry.py` covers the Settings sync summary: it asserts the incremental watermark reaches Zammad in a form its search cannot misparse — an inclusive bracketed range (`updated_at:[<watermark> TO *]`), not a bare-date `>` comparison (a bare date is read in the instance's timezone and `>` rounds up past the current day, while an unescaped `:` is parsed as a field separator; both fail silently with an empty result) — that a managed run records its real `source` rather than a hardcoded one, and that `duration_secs` spans the whole run.
+`tests/unit/test_sync_telemetry.py` covers the Settings sync summary: it asserts the incremental watermark reaches Zammad as an inclusive bracketed range, that a managed run records its real source, and that duration spans the whole run.
 
-`check_ticket_sorting.py` is the pattern for testing router logic without a DB: patch `cache_get`/`cache_set`/`zammad` module attributes on `app.routers.tickets`, call the endpoint function directly, `assert` on the result, run with `python`.
-
-`check_live_sla.py` is the regression check for the two-contradictory-verdicts bug: it reads one ticket through the ticket-detail path and through the SLA Monitor path and asserts an identical verdict and countdown, that the stored verdict columns are gone from both the row model and the API schema, that a closed-late ticket reports its real breach magnitude rather than deadline-minus-now, and that Unmonitored stays distinct from Breached. It also asserts a synced ticket still carries every Zammad SLA fact the live computation reads.
-
-`check_sla_freshness.py` is the regression check for the stale-dataset bug: it asserts the SLA Monitor response carries Data freshness for every role that can view it (admin, team lead, project manager, agent) without widening the administrator-only `/settings` endpoint — whose route dependency still rejects an agent with 403 while accepting an admin — and that freshness classifies Never Synced / Up to Date / Out of Date from the checkpoint, falling back to the sync watermark. The verdict rows still ride along in the payload when the dataset is stale (degrading them to Unavailable is the frontend's job), so the check pins that boundary too.
-
-`check_beat_schedule.py` asserts that a scheduler refresh applies a changed interval while preserving each existing entry's `last_run_at` and `total_run_count`, and that a Full Reconcile whose interval has elapsed is still due after a refresh.
-
-`check_sla_staleness.py` asserts the staleness bounds against the live synced store, each catching a different way the dataset goes stale: (1) dataset freshness must be Up to Date, (2) a sample of synced rows must carry Zammad's own `updated_at` — a row whose facts differ from Zammad's, by more than one sync window, is a ticket left behind — and (3) a run that reports success while fetching nothing only fails once rows are corroborated behind. It also re-samples the freshest real rows to assert one verdict and one countdown across the detail and SLA Monitor paths, and — for the reported ticket `20260914410002` — that a closed ticket is absent from the SLA Monitor's active list, appears in its breach log with the same figure, and states its real breach magnitude rather than a countdown. It exits non-zero on a violation, so a future silent stall fails this check instead of being found by a user. Run it after a Full Reconcile to verify the backfill; it is expected to fail on a stalled dataset.
+`tests/integration/test_sla_staleness.py` verifies live dataset freshness and ticket facts after a Full Reconcile. It requires the configured PostgreSQL and Zammad services.
 
 ## Not implemented yet (per PRD)
 

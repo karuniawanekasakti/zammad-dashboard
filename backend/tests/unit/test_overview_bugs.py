@@ -13,7 +13,7 @@ Bug 2 (tab):   open tab empty because currently-open tickets' created/closed/upd
                timestamps fell outside the narrow window; fixed by scoping the tab
                to current state within the window rather than interval overlap.
 
-Run: python check_overview_bugs.py  (inside api container or backend venv)
+Run from backend/: .venv/bin/python tests/run.py unit/test_overview_bugs.py
 """
 from __future__ import annotations
 

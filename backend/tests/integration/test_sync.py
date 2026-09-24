@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 """Runnable self-check: runs a full Zammad -> PostgreSQL sync and verifies counts.
 
-Usage:
-    docker compose exec api python check_sync.py
+Usage from the repository root:
+    docker compose exec api python tests/run.py integration/test_sync.py
 """
 import asyncio
 import sys

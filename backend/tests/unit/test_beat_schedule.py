@@ -1,6 +1,6 @@
 """Check beat schedule refreshes preserve accumulated entry state.
 
-Run inside the backend venv: python check_beat_schedule.py
+Run from backend/: .venv/bin/python tests/run.py unit/test_beat_schedule.py
 """
 from datetime import datetime, timedelta, timezone
 import json

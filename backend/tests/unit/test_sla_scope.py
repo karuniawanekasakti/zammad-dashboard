@@ -1,6 +1,6 @@
 """Check SLA monitor authorization and group filtering at the router seam.
 
-Run inside the api container or backend venv: python check_sla_scope.py
+Run from backend/: .venv/bin/python tests/run.py unit/test_sla_scope.py
 """
 from __future__ import annotations
 

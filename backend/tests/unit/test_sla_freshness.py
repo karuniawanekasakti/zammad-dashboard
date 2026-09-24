@@ -7,7 +7,7 @@ SLA Monitor response the page already fetches, so the page can degrade its
 verdicts — and it does so for every role that may view them, without widening
 the administrator-only settings endpoint.
 
-Run inside the api container or backend venv: python check_sla_freshness.py
+Run from backend/: .venv/bin/python tests/run.py unit/test_sla_freshness.py
 """
 from __future__ import annotations
 

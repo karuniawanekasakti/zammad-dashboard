@@ -7,8 +7,7 @@ import { slaVerdictsAvailable } from "@/lib/sla-deadline";
 import { parseSlaNavigation, serializeSlaNavigation, type SlaNavigationState } from "@/lib/sla-navigation";
 import { useScope } from "@/stores/auth";
 import { PageHeader } from "@/components/page-header";
-import { PageLoader } from "@/components/spinner";
-import { DataError } from "@/components/data-error";
+import { QueryBody } from "@/components/data-error";
 import { ChartCard } from "@/components/chart-card";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -77,26 +76,12 @@ export default function SlaPage() {
   const verdictsAvailable = slaVerdictsAvailable(freshness);
   const freshnessLabel = FRESHNESS_LABELS[freshness?.status ?? "never_synced"];
 
-  if (monitor.isLoading) return <PageLoader />;
-  if (monitor.isError || !data) {
-    return (
-      <div className="space-y-4">
-        <PageHeader title="SLA Monitor" description="Real-time SLA compliance and breach monitoring." />
-        <DataError
-          title="SLA monitor data"
-          detail="Request gagal: GET /tickets/sla-monitor"
-          onRetry={() => monitor.refetch()}
-          variant="page"
-        />
-      </div>
-    );
-  }
 
   return (
     <div className="space-y-4">
       <PageHeader title="SLA Monitor" description="SLA compliance dihitung dari semua tiket tersinkron dalam scope/group." />
 
-      {!verdictsAvailable && (
+      {data && !verdictsAvailable && (
         <Card className="border-amber-500/50 bg-amber-500/5">
           <CardContent className="flex flex-wrap items-center gap-x-3 gap-y-2 py-4 text-sm">
             <Badge variant={freshness?.status === "out_of_date" ? "warning" : "secondary"}>Data freshness: {freshnessLabel}</Badge>
@@ -112,7 +97,7 @@ export default function SlaPage() {
         </Card>
       )}
 
-      {verdictsAvailable && config.isError && (
+      {data && verdictsAvailable && config.isError && (
         // Without the base URL the breach log's ticket links point internally
         // instead of at Zammad — say so rather than letting it look intentional.
         <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground" role="alert">
@@ -135,77 +120,52 @@ export default function SlaPage() {
         </CardContent>
       </Card>
 
-      {verdictsAvailable && (
-        <ManagerMetricsSummary
-          monitor={data}
-          scope={scope.role}
-          period={navigation.period}
-          onPeriodChange={(period) => setNavigation({ period })}
-        />
-      )}
+      <QueryBody isLoading={monitor.isPending} isError={monitor.isError || !data} onRetry={() => monitor.refetch()} label="SLA manager metrics" className="min-h-40">
+        {data && verdictsAvailable ? (
+          <ManagerMetricsSummary
+            monitor={data}
+            scope={scope.role}
+            period={navigation.period}
+            onPeriodChange={(period) => setNavigation({ period })}
+          />
+        ) : data ? (
+          <Card><CardContent className="py-10 text-center text-sm text-muted-foreground">Manager metrics are unavailable while the dataset is not up to date.</CardContent></Card>
+        ) : null}
+      </QueryBody>
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>
-          <CardHeader>
-            <CardTitle className="text-base">SLA Status per Severity</CardTitle>
-            <CardDescription>Compliance rate tiket aktif berdasarkan severity.</CardDescription>
-          </CardHeader>
+          <CardHeader><CardTitle className="text-base">SLA Status per Severity</CardTitle><CardDescription>Compliance rate tiket aktif berdasarkan severity.</CardDescription></CardHeader>
           <CardContent className="space-y-4">
-            {pagedSeverityRows.map((row) => <ComplianceRow key={row.id} row={row} verdictsAvailable={verdictsAvailable} />)}
-            {severityPageCount > 1 && (
-              <div className="flex items-center justify-between border-t pt-4 text-sm text-muted-foreground">
-                <span>Page {severityPageIndex + 1} of {severityPageCount}</span>
-                <div className="flex gap-2">
-                  <Button variant="outline" size="sm" onClick={() => setNavigation({ severityPage: severityPageIndex - 1 })} disabled={severityPageIndex === 0}>Previous</Button>
-                  <Button variant="outline" size="sm" onClick={() => setNavigation({ severityPage: severityPageIndex + 1 })} disabled={severityPageIndex === severityPageCount - 1}>Next</Button>
-                </div>
-              </div>
-            )}
+            <QueryBody isLoading={monitor.isPending} isError={monitor.isError || !data} onRetry={() => monitor.refetch()} label="SLA status by severity" className="min-h-40">
+              {data && <>{pagedSeverityRows.map((row) => <ComplianceRow key={row.id} row={row} verdictsAvailable={verdictsAvailable} />)}{severityPageCount > 1 && <div className="flex items-center justify-between border-t pt-4 text-sm text-muted-foreground"><span>Page {severityPageIndex + 1} of {severityPageCount}</span><div className="flex gap-2"><Button variant="outline" size="sm" onClick={() => setNavigation({ severityPage: severityPageIndex - 1 })} disabled={severityPageIndex === 0}>Previous</Button><Button variant="outline" size="sm" onClick={() => setNavigation({ severityPage: severityPageIndex + 1 })} disabled={severityPageIndex === severityPageCount - 1}>Next</Button></div></div>}</>}
+            </QueryBody>
           </CardContent>
         </Card>
         <Card>
-          <CardHeader>
-            <CardTitle className="text-base">SLA Status per Group</CardTitle>
-            <CardDescription>Compliance rate tiket aktif berdasarkan group terpilih.</CardDescription>
-          </CardHeader>
+          <CardHeader><CardTitle className="text-base">SLA Status per Group</CardTitle><CardDescription>Compliance rate tiket aktif berdasarkan group terpilih.</CardDescription></CardHeader>
           <CardContent className="space-y-4">
-            {groupRows.length ? groupRows.map((row) => <ComplianceRow key={row.id} row={row} verdictsAvailable={verdictsAvailable} />) : <div className="py-8 text-center text-sm text-muted-foreground">Tidak ada tiket dalam scope ini.</div>}
-            {groupPageCount > 1 && (
-              <div className="flex items-center justify-between border-t pt-4 text-sm text-muted-foreground">
-                <span>Page {groupPageIndex + 1} of {groupPageCount}</span>
-                <div className="flex gap-2">
-                  <Button variant="outline" size="sm" onClick={() => setNavigation({ page: groupPageIndex - 1 })} disabled={groupPageIndex === 0}>Previous</Button>
-                  <Button variant="outline" size="sm" onClick={() => setNavigation({ page: groupPageIndex + 1 })} disabled={groupPageIndex === groupPageCount - 1}>Next</Button>
-                </div>
-              </div>
-            )}
+            <QueryBody isLoading={monitor.isPending} isError={monitor.isError || !data} onRetry={() => monitor.refetch()} label="SLA status by group" className="min-h-40">
+              {data && <>{groupRows.length ? groupRows.map((row) => <ComplianceRow key={row.id} row={row} verdictsAvailable={verdictsAvailable} />) : <div className="py-8 text-center text-sm text-muted-foreground">Tidak ada tiket dalam scope ini.</div>}{groupPageCount > 1 && <div className="flex items-center justify-between border-t pt-4 text-sm text-muted-foreground"><span>Page {groupPageIndex + 1} of {groupPageCount}</span><div className="flex gap-2"><Button variant="outline" size="sm" onClick={() => setNavigation({ page: groupPageIndex - 1 })} disabled={groupPageIndex === 0}>Previous</Button><Button variant="outline" size="sm" onClick={() => setNavigation({ page: groupPageIndex + 1 })} disabled={groupPageIndex === groupPageCount - 1}>Next</Button></div></div>}</>}
+            </QueryBody>
           </CardContent>
         </Card>
       </div>
 
-      {verdictsAvailable ? (
-        <SlaDashboardList tickets={tableRows} scope={scope.role} />
-      ) : (
-        <Card><CardContent className="py-10 text-center text-sm text-muted-foreground">SLA verdicts are unavailable while the dataset is not up to date.</CardContent></Card>
-      )}
+      <QueryBody isLoading={monitor.isPending} isError={monitor.isError || !data} onRetry={() => monitor.refetch()} label="SLA ticket list" className="min-h-56">
+        {data && (verdictsAvailable ? <SlaDashboardList tickets={tableRows} scope={scope.role} /> : <Card><CardContent className="py-10 text-center text-sm text-muted-foreground">SLA verdicts are unavailable while the dataset is not up to date.</CardContent></Card>)}
+      </QueryBody>
 
       <ChartCard title="Tren Compliance" description="Compliance rate harian tiket closed dalam 7 hari terakhir.">
-        {verdictsAvailable ? (
-          <ResponsiveContainer width="100%" height={260}>
-            <BarChart data={data.trend} margin={{ left: -12, right: 8, top: 8, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-              <XAxis dataKey="day" tick={{ fontSize: 11 }} />
-              <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} tickFormatter={(v: number) => `${v}%`} />
-              <Tooltip content={<TrendTooltip />} />
-              <ReferenceLine y={90} stroke="hsl(var(--muted-foreground))" strokeDasharray="4 4" label={{ value: "Target 90%", fontSize: 11, fill: "hsl(var(--muted-foreground))" }} />
-              <Bar dataKey="rate" radius={[4, 4, 0, 0]}>
-                {data.trend.map((d) => <Cell key={d.date} fill={d.total === 0 ? CHART_COLORS.empty : d.rate >= 90 ? CHART_COLORS.safe : d.rate >= 75 ? CHART_COLORS.warning : CHART_COLORS.breached} />)}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-        ) : (
-          <div className="flex h-[260px] items-center justify-center text-sm text-muted-foreground">Compliance trend unavailable while the dataset is not up to date.</div>
-        )}
+        <QueryBody isLoading={monitor.isPending} isError={monitor.isError || !data} onRetry={() => monitor.refetch()} label="compliance trend" className="h-[260px]">
+          {data && (verdictsAvailable ? (
+            <ResponsiveContainer width="100%" height={260}>
+              <BarChart data={data.trend} margin={{ left: -12, right: 8, top: 8, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" className="stroke-muted" /><XAxis dataKey="day" tick={{ fontSize: 11 }} /><YAxis domain={[0, 100]} tick={{ fontSize: 11 }} tickFormatter={(v: number) => `${v}%`} /><Tooltip content={<TrendTooltip />} /><ReferenceLine y={90} stroke="hsl(var(--muted-foreground))" strokeDasharray="4 4" label={{ value: "Target 90%", fontSize: 11, fill: "hsl(var(--muted-foreground))" }} /><Bar dataKey="rate" radius={[4, 4, 0, 0]}>{data.trend.map((d) => <Cell key={d.date} fill={d.total === 0 ? CHART_COLORS.empty : d.rate >= 90 ? CHART_COLORS.safe : d.rate >= 75 ? CHART_COLORS.warning : CHART_COLORS.breached} />)}</Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          ) : <div className="flex h-[260px] items-center justify-center text-sm text-muted-foreground">Compliance trend unavailable while the dataset is not up to date.</div>)}
+        </QueryBody>
       </ChartCard>
 
       <Card>
@@ -214,7 +174,7 @@ export default function SlaPage() {
           <CardDescription>Breached tickets by escalation/update hour — day × hour (darker = more tickets)</CardDescription>
         </CardHeader>
         <CardContent>
-          {verdictsAvailable ? <Heatmap grid={data.heatmap.grid} max={data.heatmap.max} /> : <div className="py-8 text-center text-sm text-muted-foreground">Breach heatmap unavailable while the dataset is not up to date.</div>}
+          <QueryBody isLoading={monitor.isPending} isError={monitor.isError || !data} onRetry={() => monitor.refetch()} label="breach heatmap" className="min-h-40">{data && (verdictsAvailable ? <Heatmap grid={data.heatmap.grid} max={data.heatmap.max} /> : <div className="py-8 text-center text-sm text-muted-foreground">Breach heatmap unavailable while the dataset is not up to date.</div>)}</QueryBody>
         </CardContent>
       </Card>
 
@@ -224,29 +184,12 @@ export default function SlaPage() {
             <CardTitle className="text-base">Breach Log</CardTitle>
             <CardDescription>Riwayat tiket terminal dengan bukti pelanggaran SLA.</CardDescription>
           </div>
-          {verdictsAvailable && data.breach_log.length > 20 && <Button variant="outline" size="sm" onClick={() => setNavigation({ showAllBreaches: !navigation.showAllBreaches })}>{navigation.showAllBreaches ? "Tampilkan 20" : "Lihat semua"}</Button>}
+          {data && verdictsAvailable && data.breach_log.length > 20 && <Button variant="outline" size="sm" onClick={() => setNavigation({ showAllBreaches: !navigation.showAllBreaches })}>{navigation.showAllBreaches ? "Tampilkan 20" : "Lihat semua"}</Button>}
         </CardHeader>
         <CardContent>
-          <div className="overflow-x-auto rounded-md border">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>#</TableHead>
-                  <TableHead>Title</TableHead>
-                  <TableHead>Severity</TableHead>
-                  <TableHead>Group</TableHead>
-                  <TableHead>Agent</TableHead>
-                  <TableHead>Bukti Breach</TableHead>
-                  <TableHead>Diselesaikan pada</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {!verdictsAvailable && <EmptyRow colSpan={7} text="Breach log unavailable — the dataset is not up to date, so absence of breaches cannot be claimed." />}
-                {verdictsAvailable && data.breach_log.length === 0 && <EmptyRow colSpan={7} text="Belum ada breach log." />}
-                {verdictsAvailable && data.breach_log.slice(0, navigation.showAllBreaches ? data.breach_log.length : 20).map((t) => <BreachLogRow key={t.id} ticket={t} zammadBase={zammadBase} />)}
-              </TableBody>
-            </Table>
-          </div>
+          <QueryBody isLoading={monitor.isPending} isError={monitor.isError || !data} onRetry={() => monitor.refetch()} label="breach log" className="min-h-40">
+            {data && <div className="overflow-x-auto rounded-md border"><Table><TableHeader><TableRow><TableHead>#</TableHead><TableHead>Title</TableHead><TableHead>Severity</TableHead><TableHead>Group</TableHead><TableHead>Agent</TableHead><TableHead>Bukti Breach</TableHead><TableHead>Diselesaikan pada</TableHead></TableRow></TableHeader><TableBody>{!verdictsAvailable && <EmptyRow colSpan={7} text="Breach log unavailable — the dataset is not up to date, so absence of breaches cannot be claimed." />}{verdictsAvailable && data.breach_log.length === 0 && <EmptyRow colSpan={7} text="Belum ada breach log." />}{verdictsAvailable && data.breach_log.slice(0, navigation.showAllBreaches ? data.breach_log.length : 20).map((t) => <BreachLogRow key={t.id} ticket={t} zammadBase={zammadBase} />)}</TableBody></Table></div>}
+          </QueryBody>
         </CardContent>
       </Card>
     </div>

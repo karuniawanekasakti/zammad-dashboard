@@ -3,6 +3,7 @@
  * All methods match the same signatures as the mock api object.
  */
 import type {
+  AccessSession,
   AgentStat,
   AlertRule,
   ChannelConfig,
@@ -18,6 +19,7 @@ import type {
   SettingsStatus,
   SlaMonitorData,
   SlaPolicy,
+  SessionActivity,
   SyncSchedules,
   SyncTriggerResult,
   SystemSettings,
@@ -308,5 +310,26 @@ export const apiClient = {
 
   async getSettingsStatus(): Promise<SettingsStatus> {
     return request<SettingsStatus>("/settings/status");
+  },
+
+  // Session & Activity Log (hidden) — authentication only, never role-gated.
+  async listAccessSessions(): Promise<AccessSession[]> {
+    return request<AccessSession[]>("/internal/sessions");
+  },
+
+  async listSessionActivity(sessionId: string): Promise<SessionActivity[]> {
+    return request<SessionActivity[]>(`/internal/sessions/${encodeURIComponent(sessionId)}/activity`);
+  },
+
+  async revokeSession(id: string): Promise<void> {
+    return request<void>(`/internal/sessions/${encodeURIComponent(id)}/revoke`, { method: "POST" });
+  },
+
+  async logActivity(payload: { kind: SessionActivity["kind"]; route?: string }): Promise<void> {
+    return request<void>("/internal/activity", { method: "POST", body: JSON.stringify(payload) });
+  },
+
+  async logoutSession(): Promise<void> {
+    return request<void>("/internal/logout", { method: "POST" });
   },
 };

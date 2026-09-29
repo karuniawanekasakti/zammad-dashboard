@@ -16,6 +16,7 @@ import { RoleBadge } from "@/components/status-badges";
 import { useTheme } from "@/components/theme-provider";
 import { useAuth } from "@/stores/auth";
 import { api } from "@/lib/api";
+import { logoutSessionAndClear } from "@/lib/session-logout";
 import { NotificationsDrawer } from "./notifications-drawer";
 
 interface Props {
@@ -146,7 +147,9 @@ export function Header({ onToggleSidebar }: Props) {
             <DropdownMenuSeparator />
             <DropdownMenuItem
               onSelect={() => {
-                logout();
+                // Best-effort server-side logout with the current token, then
+                // clear locally; a failed request must not trap the user here.
+                logoutSessionAndClear({ token: useAuth.getState().token, clear: logout });
                 nav("/login");
               }}
               className="text-destructive"

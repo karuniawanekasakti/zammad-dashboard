@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Integer, String, Text
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
@@ -150,3 +150,27 @@ class SettingRow(Base):
     key: Mapped[str] = mapped_column(String(100), primary_key=True)
     value: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class AccessSessionRow(Base):
+    __tablename__ = "access_sessions"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    user_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    user_agent: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    ip: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    device_label: Mapped[str] = mapped_column(String(120), nullable=False, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    logout_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class SessionActivityRow(Base):
+    __tablename__ = "session_activity"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    session_id: Mapped[str] = mapped_column(ForeignKey("access_sessions.id", ondelete="CASCADE"), nullable=False, index=True)
+    kind: Mapped[str] = mapped_column(String(50), nullable=False)
+    route: Mapped[str | None] = mapped_column(String(500))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

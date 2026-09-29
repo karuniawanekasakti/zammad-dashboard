@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.db import dispose_engine
-from app.routers import auth, tickets, agents, groups, kpi, alerts, notifications, channels, webhooks, system, settings as settings_router, slas, ws
+from app.routers import auth, tickets, agents, groups, kpi, alerts, notifications, channels, webhooks, system, settings as settings_router, slas, ws, internal
 
 
 @asynccontextmanager
@@ -40,6 +40,8 @@ def create_app() -> FastAPI:
     app.include_router(settings_router.router, prefix="/settings", tags=["settings"])
     app.include_router(slas.router, prefix="/slas", tags=["slas"])
     app.include_router(ws.router, tags=["websocket"])
+    # Hidden developer surface: JWT-gated but never advertised in /docs.
+    app.include_router(internal.router, prefix="/internal", tags=["internal"], include_in_schema=False)
 
     return app
 

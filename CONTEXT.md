@@ -101,3 +101,11 @@ the previously running version serving traffic.
 
 A **rollback** is a deploy of an earlier release. There is no special undo
 mechanism: to roll back, re-run the deploy workflow for the previous tag.
+
+## Session & Activity Log
+
+An **Access Session** is one signed-in visit: the browser and network location it came from, when it began, when it was last seen, and how it ended. It is the unit the hidden Session & Activity Log lists — one row per accessing computer, not per user. Ending means either an explicit logout or a **revocation**, which force-ends the session before any later request may act on it.
+
+A **Session Activity** is the timeline of meaningful events recorded during one Access Session — its beginning, the routes viewed, and its end — with repeated consecutive visits to the same route collapsed into a single entry. Session Activity is never a record of ticket activity: tickets changing state or SLA status is Synchronization and SLA Monitoring, and neither appears here.
+
+These terms belong to two different scopes, and the difference is deliberate. Access Session and Session Activity describe **access to the dashboard** across signed-in visits. **Authorized scope** is the ticket population a signed-in role may read; it does not define which Access Sessions appear in the hidden log.

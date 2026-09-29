@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { User } from "@/types";
+import { SESSION_LOG_REVEAL_KEY } from "@/lib/session-log";
 
 interface AuthState {
   user: User | null;
@@ -18,7 +19,14 @@ export const useAuth = create<AuthState>()(
       token: null,
       setUser: (u) => set({ user: u }),
       setToken: (t) => set({ token: t }),
-      logout: () => set({ user: null, token: null }),
+      logout: () => {
+        try {
+          localStorage.removeItem(SESSION_LOG_REVEAL_KEY);
+        } catch {
+          // Storage failures must not prevent logout.
+        }
+        set({ user: null, token: null });
+      },
     }),
     {
       name: "zm-auth",

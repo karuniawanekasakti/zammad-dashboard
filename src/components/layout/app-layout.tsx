@@ -3,10 +3,12 @@ import { Outlet } from "react-router-dom";
 import { Sidebar } from "./sidebar";
 import { Header } from "./header";
 import { useAuth } from "@/stores/auth";
+import { useActivityBeacon } from "@/hooks/use-activity-beacon";
 
 export function AppLayout() {
   const [collapsed, setCollapsed] = useState(false);
   const user = useAuth((s) => s.user);
+  useActivityBeacon();
   if (!user) return null;
   return (
     <div className="flex h-screen overflow-hidden bg-muted/40">

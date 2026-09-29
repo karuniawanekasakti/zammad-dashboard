@@ -17,6 +17,7 @@ import SettingsPage from "@/pages/settings";
 import ChannelsPage from "@/pages/channels";
 import ReportsPage from "@/pages/reports";
 import AlertsPage from "@/pages/alerts";
+import SessionLogPage from "@/pages/session-log";
 
 export default function App() {
   return (
@@ -39,6 +40,8 @@ export default function App() {
         <Route path="/alerts" element={<AlertsPage />} />
         <Route path="/settings/channels" element={<ChannelsPage />} />
         <Route path="/settings" element={<RequireAuth roles={["admin"]}><SettingsPage /></RequireAuth>} />
+        {/* Hidden surface: authenticated, deliberately not role-gated. */}
+        <Route path="/session-log" element={<SessionLogPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/dashboard" replace />} />
     </Routes>

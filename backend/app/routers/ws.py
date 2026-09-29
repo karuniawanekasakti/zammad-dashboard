@@ -2,12 +2,12 @@
 from __future__ import annotations
 import asyncio
 import json
-from typing import Annotated
-
-from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect, Query
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
 from redis.asyncio import Redis
 
-from app.deps import decode_token, get_redis
+from app.db import SessionLocal
+from app.deps import decode_token, ensure_session_active, get_redis
+
 
 router = APIRouter()
 
@@ -44,6 +44,16 @@ async def websocket_endpoint(ws: WebSocket, room: str, token: str = Query(...)):
     except Exception:
         await ws.close(code=4001)
         return
+
+    # Reject a revoked/unknown session at establishment time (fail fast, before
+    # any room is joined or Redis subscription is opened).
+    try:
+        async with SessionLocal() as db:
+            await ensure_session_active(user.get("sid"), await get_redis(), db, user.get("exp"))
+    except Exception:
+        await ws.close(code=4001)
+        return
+
 
     await manager.connect(ws, room)
 

@@ -1,6 +1,11 @@
 import { slaDeadline, slaProgress, slaRemainingMs, slaStatus } from "@/lib/sla-deadline";
 import { ARTICLE_PAGE_SIZE } from "@/lib/article-pagination";
 import {
+  accessSessions,
+  sessionActivity,
+  appendSessionActivity,
+  markSessionLoggedOut,
+  setSessionRevoked,
   agentStats,
   alertRules,
   articlesForTicket,
@@ -24,6 +29,7 @@ import {
   uuid,
 } from "@/lib/mock-data";
 import type {
+  AccessSession,
   AgentStat,
   AlertRule,
   ChannelConfig,
@@ -37,6 +43,7 @@ import type {
   ReportExport,
   Role,
   ManagerMetricsPeriod,
+  SessionActivity,
   SettingsBundle,
   SettingsStatus,
   SlaMonitorData,
@@ -732,6 +739,44 @@ const mockApi = {
       }
     }
     return delay(mockSyncStatus(now));
+  },
+
+  // Session & Activity Log (hidden) -----------------------------------------
+  async listAccessSessions(): Promise<AccessSession[]> {
+    return delay(
+      [...accessSessions].sort(
+        (a, b) => new Date(b.last_seen_at).getTime() - new Date(a.last_seen_at).getTime()
+      )
+    );
+  },
+
+  async listSessionActivity(sessionId: string): Promise<SessionActivity[]> {
+    return delay(
+      sessionActivity
+        .filter((entry) => entry.session_id === sessionId)
+        .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+    );
+  },
+
+  async revokeSession(id: string): Promise<void> {
+    setSessionRevoked(id);
+    return delay(undefined, 120);
+  },
+
+  async logActivity(payload: { kind: SessionActivity["kind"]; route?: string }): Promise<void> {
+    appendSessionActivity({
+      id: uuid("act", sessionActivity.length + 1),
+      session_id: accessSessions[0]?.id ?? "sess-000001",
+      kind: payload.kind,
+      route: payload.route ?? null,
+      created_at: new Date().toISOString(),
+    });
+    return delay(undefined, 40);
+  },
+
+  async logoutSession(): Promise<void> {
+    markSessionLoggedOut(accessSessions[0]?.id ?? "sess-000001");
+    return delay(undefined, 40);
   },
 };
 

@@ -49,7 +49,7 @@ async function requestRaw<T>(path: string, opts: RequestInit = {}): Promise<{ da
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    ...(opts.headers as Record<string, string> ?? {}),
+    ...((opts.headers as Record<string, string>) ?? {}),
   };
   const res = await fetch(`${BASE}${path}`, { ...opts, headers });
   if (res.status === 401) {
@@ -94,11 +94,14 @@ export const apiClient = {
     return request<User | null>("/auth/me");
   },
 
+  // Sliding session: trade the current bearer token for a freshly issued one.
+  async refreshSession(): Promise<void> {
+    const { token } = await request<{ token: string }>("/auth/refresh", { method: "POST" });
+    useAuth.getState().setToken(token);
+  },
+
   // Tickets
-  async listTickets(
-    _scope: Scope,
-    filters: TicketFilters = {}
-  ): Promise<{ rows: Ticket[]; total: number }> {
+  async listTickets(_scope: Scope, filters: TicketFilters = {}): Promise<{ rows: Ticket[]; total: number }> {
     const params = qs({
       page: filters.page,
       per_page: filters.page_size,
@@ -127,7 +130,7 @@ export const apiClient = {
 
   async getTicketHistory(id: string): Promise<TicketHistory[]> {
     const data = await request<TicketHistory[] | { history?: TicketHistory[] }>(`/ticket_history/${id}`);
-    return Array.isArray(data) ? data : data.history ?? [];
+    return Array.isArray(data) ? data : (data.history ?? []);
   },
 
   async listAtRisk(_scope: Scope): Promise<Ticket[]> {
@@ -169,20 +172,22 @@ export const apiClient = {
 
   async getOverview(
     _scope: Scope,
-    params: { period: OverviewPeriod; year: number; month?: number; week?: string; day?: string; group_id?: string | "all"; owner_id?: string | "all"; tab?: OverviewTab; page?: number; page_size?: number }
+    params: { period: OverviewPeriod; year: number; month?: number; week?: string; day?: string; group_id?: string | "all"; owner_id?: string | "all"; tab?: OverviewTab; page?: number; page_size?: number },
   ): Promise<OverviewData> {
-    return request<OverviewData>(`/tickets/overview${qs({
-      period: params.period,
-      year: params.year,
-      month: params.month,
-      week: params.week,
-      day: params.day,
-      group_id: params.group_id,
-      owner_id: params.owner_id,
-      tab: params.tab,
-      page: params.page,
-      per_page: params.page_size,
-    })}`);
+    return request<OverviewData>(
+      `/tickets/overview${qs({
+        period: params.period,
+        year: params.year,
+        month: params.month,
+        week: params.week,
+        day: params.day,
+        group_id: params.group_id,
+        owner_id: params.owner_id,
+        tab: params.tab,
+        page: params.page,
+        per_page: params.page_size,
+      })}`,
+    );
   },
 
   // Agents

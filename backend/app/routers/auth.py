@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.cache import cache_set
 from app.deps import create_token, get_current_user, get_db
-from app.models import LoginRequest, Role, TokenResponse, UserOut
+from app.models import ApiResponse, LoginRequest, Role, TokenResponse, UserOut
 from app.repositories import upsert_user
 from app.zammad_client import zammad
 
@@ -77,3 +77,14 @@ async def me(current: Annotated[dict, Depends(get_current_user)]):
     z = await zammad.get_user(int(current["sub"]))
     role = Role(current["role"])
     return _map_user(z, role)
+
+
+@router.post("/refresh", response_model=ApiResponse)
+async def refresh(current: Annotated[dict, Depends(get_current_user)]):
+    """Sliding session: reissue a token, with a fresh expiry, from the caller's claims.
+
+    `get_current_user` has already rejected an expired or forged token, so an
+    idle session cannot refresh itself back to life.
+    """
+    token = create_token(current["sub"], Role(current["role"]), current.get("group_ids", []))
+    return ApiResponse(data={"token": token})

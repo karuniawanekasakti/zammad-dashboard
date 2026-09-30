@@ -28,7 +28,7 @@ REDIS_PASSWORD=replace-with-dashboard-redis-password
 DATABASE_URL=postgresql+asyncpg://postgres:replace-with-dashboard-db-password@db:5432/zammad_dashboard
 REDIS_URL=redis://:replace-with-dashboard-redis-password@redis:6379/0
 CORS_ORIGINS=[]
-JWT_EXPIRY_HOURS=8
+JWT_EXPIRY_HOURS=1
 
 # Optional deployment knobs
 DEPLOY_BIND_HOST=127.0.0.1
@@ -76,7 +76,7 @@ chmod +x deploy/deploy.sh
 ./deploy/deploy.sh
 ```
 
-The script runs preflight checks, optionally pulls, builds images, applies migrations as a one-shot container *before* switching services, then health-checks — the full step-by-step is in [docs/CI-CD.md](../docs/CI-CD.md#what-a-deploy-does).
+The script runs preflight checks, optionally pulls, builds images, applies migrations as a one-shot container _before_ switching services, then health-checks — the full step-by-step is in [docs/CI-CD.md](../docs/CI-CD.md#what-a-deploy-does).
 
 The migration also still runs in `backend/Dockerfile` before Uvicorn starts (running it twice is a no-op):
 

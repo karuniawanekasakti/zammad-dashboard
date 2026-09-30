@@ -219,6 +219,32 @@ class WsMessage(BaseModel):
     room: str = ""
 
 
+# --- Session & Activity Log (hidden) ---
+class ActivityEventIn(BaseModel):
+    kind: str
+    route: str | None = None
+
+
+class AccessSessionOut(BaseModel):
+    id: str
+    user_id: str
+    device_label: str
+    ip: str
+    user_agent: str
+    created_at: datetime
+    last_seen_at: datetime
+    logout_at: datetime | None = None
+    revoked: bool = False
+
+
+class SessionActivityOut(BaseModel):
+    id: str
+    session_id: str
+    kind: str
+    route: str | None = None
+    created_at: datetime
+
+
 # --- Generic ---
 class ApiResponse(BaseModel):
     success: bool = True

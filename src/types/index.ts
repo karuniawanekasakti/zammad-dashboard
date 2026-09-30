@@ -440,3 +440,25 @@ export interface SystemSettings {
   last_full_sync_at: string;
   zammad_online: boolean;
 }
+
+// --- Hidden Session & Activity Log -----------------------------------------
+export interface AccessSession {
+  id: string;
+  user_id: string;
+  device_label: string;
+  ip: string;
+  user_agent: string;
+  created_at: string;
+  last_seen_at: string;
+  logout_at: string | null;
+  revoked: boolean;
+}
+
+/** Server lifecycle events plus route views. */
+export interface SessionActivity {
+  id: string;
+  session_id: string;
+  kind: "login" | "logout" | "revoke" | "view";
+  route: string | null;
+  created_at: string;
+}

@@ -1,22 +1,36 @@
 """Data access helpers (write = upsert, read = select)."""
 from datetime import datetime, timezone
+import uuid
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db_models import (
+    AccessSessionRow,
     AlertRuleRow,
     ChannelRow,
     GroupRow,
     NotificationRow,
+    SessionActivityRow,
     SettingRow,
     TicketArticleRow,
     TicketHistoryRow,
     TicketRow,
     UserRow,
 )
-from app.models import AlertRuleOut, ChannelConfigOut, GroupOut, NotificationOut, TicketArticleOut, TicketHistoryOut, TicketOut, UserOut
+from app.models import (
+    AccessSessionOut,
+    AlertRuleOut,
+    ChannelConfigOut,
+    GroupOut,
+    NotificationOut,
+    SessionActivityOut,
+    TicketArticleOut,
+    TicketHistoryOut,
+    TicketOut,
+    UserOut,
+)
 
 
 async def list_users(db: AsyncSession) -> list[UserRow]:
@@ -214,4 +228,130 @@ def _channel_dict(row: ChannelRow) -> dict:
         config=row.config,
         is_active=row.is_active,
         verified_at=row.verified_at,
+    ).model_dump(mode="json")
+
+
+async def create_access_session(db: AsyncSession, session: AccessSessionOut) -> None:
+    """Insert the login row and its `login` lifecycle event, then commit.
+
+    One commit so both rows are durable before the JWT carrying the session id
+    is handed back to the client.
+    """
+    now = datetime.now(timezone.utc)
+    db.add(
+        AccessSessionRow(
+            id=session.id,
+            user_id=session.user_id,
+            user_agent=session.user_agent,
+            ip=session.ip,
+            device_label=session.device_label,
+            created_at=session.created_at,
+            last_seen_at=session.last_seen_at,
+            revoked=False,
+        )
+    )
+    db.add(
+        SessionActivityRow(
+            id=str(uuid.uuid4()),
+            session_id=session.id,
+            kind="login",
+            route=None,
+            created_at=now,
+        )
+    )
+    await db.commit()
+
+
+async def get_access_session(db: AsyncSession, session_id: str) -> dict | None:
+    row = await db.get(AccessSessionRow, session_id)
+    return _access_session_dict(row) if row else None
+
+
+async def list_access_sessions(db: AsyncSession, limit: int = 100) -> list[dict]:
+    rows = (await db.scalars(
+        select(AccessSessionRow).order_by(AccessSessionRow.last_seen_at.desc()).limit(limit)
+    )).all()
+    return [_access_session_dict(row) for row in rows]
+
+
+async def revoke_access_session(db: AsyncSession, session_id: str) -> bool:
+    row = await db.get(AccessSessionRow, session_id)
+    if row is None:
+        return False
+    now = datetime.now(timezone.utc)
+    row.revoked = True
+    row.logout_at = now
+    row.last_seen_at = now
+    await db.commit()
+    return True
+
+
+async def touch_access_session(db: AsyncSession, session_id: str) -> None:
+    row = await db.get(AccessSessionRow, session_id)
+    if row is not None:
+        row.last_seen_at = datetime.now(timezone.utc)
+        await db.commit()
+
+
+async def close_access_session(db: AsyncSession, session_id: str) -> None:
+    row = await db.get(AccessSessionRow, session_id)
+    if row is not None:
+        now = datetime.now(timezone.utc)
+        row.logout_at = now
+        row.last_seen_at = now
+        await db.commit()
+
+
+async def list_session_activity(db: AsyncSession, session_id: str) -> list[dict]:
+    rows = (await db.scalars(
+        select(SessionActivityRow)
+        .where(SessionActivityRow.session_id == session_id)
+        .order_by(SessionActivityRow.created_at, SessionActivityRow.id)
+    )).all()
+    return [_session_activity_dict(row) for row in rows]
+
+
+async def add_session_activity(db: AsyncSession, activity: SessionActivityOut) -> None:
+    row = SessionActivityRow(
+        id=activity.id,
+        session_id=activity.session_id,
+        kind=activity.kind,
+        route=activity.route,
+        created_at=activity.created_at,
+    )
+    await db.merge(row)
+    await db.commit()
+
+
+async def last_activity(db: AsyncSession, session_id: str) -> dict | None:
+    row = await db.scalar(
+        select(SessionActivityRow)
+        .where(SessionActivityRow.session_id == session_id)
+        .order_by(SessionActivityRow.created_at.desc(), SessionActivityRow.id.desc())
+        .limit(1)
+    )
+    return _session_activity_dict(row) if row else None
+
+
+def _access_session_dict(row: AccessSessionRow) -> dict:
+    return AccessSessionOut(
+        id=row.id,
+        user_id=row.user_id,
+        device_label=row.device_label,
+        ip=row.ip,
+        user_agent=row.user_agent,
+        created_at=row.created_at,
+        last_seen_at=row.last_seen_at,
+        logout_at=row.logout_at,
+        revoked=row.revoked,
+    ).model_dump(mode="json")
+
+
+def _session_activity_dict(row: SessionActivityRow) -> dict:
+    return SessionActivityOut(
+        id=row.id,
+        session_id=row.session_id,
+        kind=row.kind,
+        route=row.route,
+        created_at=row.created_at,
     ).model_dump(mode="json")

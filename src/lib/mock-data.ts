@@ -1,4 +1,5 @@
 import type {
+  AccessSession,
   AgentStat,
   AlertRule,
   ChannelConfig,
@@ -7,6 +8,7 @@ import type {
   KpiSummary,
   NotificationEvent,
   ReportExport,
+  SessionActivity,
   SyncLastRun,
   SyncSchedules,
   SystemSettings,
@@ -761,4 +763,45 @@ export function addReportExport(entry: ReportExport) {
   reportExports = [entry, ...reportExports];
 }
 
+// -- Hidden Session & Activity Log -------------------------------------------
+// Offline demo data for the hidden page: a few accessing "computers" and a
+// de-duplicated event timeline per session, mirroring the backend tables.
+const minutesAgo = (n: number) => new Date(Date.now() - n * 60_000).toISOString();
+const SESSION_SEED: Array<[string, string, string, string, number, number, number | null, boolean]> = [
+  ["sess-000001", "helpdesk", "Chrome on Windows", "10.0.4.17", 312, 2, null, false],
+  ["sess-000002", "agent", "Safari on macOS", "10.0.4.31", 1440, 180, 180, false],
+  ["sess-000003", "agent", "Firefox on Linux", "10.0.4.44", 2880, 900, 900, true],
+];
+
+const seededUserId = users.find((u) => u.role === "agent")?.id ?? users[0]?.id ?? "";
+
+export const accessSessions: AccessSession[] = SESSION_SEED.map(
+  ([id, _owner, deviceLabel, ip, createdAgo, seenAgo, logoutAgo, revoked]) => ({
+    id,
+    user_id: seededUserId,
+    device_label: deviceLabel,
+    ip,
+    user_agent: `${deviceLabel} UA`,
+    created_at: minutesAgo(createdAgo),
+    last_seen_at: minutesAgo(seenAgo),
+    logout_at: logoutAgo == null ? null : minutesAgo(logoutAgo),
+    revoked,
+  }),
+);
+
+export const sessionActivity: SessionActivity[] = [];
+
+export function appendSessionActivity(entry: SessionActivity) {
+  sessionActivity.push(entry);
+}
+
+export function setSessionRevoked(id: string) {
+  const session = accessSessions.find((s) => s.id === id);
+  if (session) session.revoked = true;
+}
+
+export function markSessionLoggedOut(id: string) {
+  const session = accessSessions.find((s) => s.id === id);
+  if (session && !session.logout_at) session.logout_at = new Date().toISOString();
+}
 export { uuid };

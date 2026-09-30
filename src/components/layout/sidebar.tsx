@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { NavLink } from "react-router-dom";
 import {
   LayoutDashboard,
@@ -10,9 +11,11 @@ import {
   BellRing,
   Settings,
   Radio,
+  ScrollText,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { appVersion, logoUrl } from "@/lib/version";
+import { advanceRevealClick, parseReveal, SESSION_LOG_REVEAL_KEY } from "@/lib/session-log";
 import type { Role } from "@/types";
 
 interface NavItem {
@@ -20,6 +23,8 @@ interface NavItem {
   label: string;
   icon: React.ElementType;
   roles?: Role[];
+  /** Hidden until revealed by the sidebar logo (see session-log helpers). */
+  hidden?: boolean;
 }
 
 const NAV: NavItem[] = [
@@ -34,10 +39,36 @@ const NAV: NavItem[] = [
   { to: "/alerts", label: "Alert Rules", icon: BellRing },
   { to: "/settings/channels", label: "Channels", icon: Radio },
   { to: "/settings", label: "System Settings", icon: Settings, roles: ["admin"] },
+  { to: "/session-log", label: "Session & Activity Log", icon: ScrollText, hidden: true },
 ];
 
+function readReveal(): boolean {
+  try {
+    return parseReveal(localStorage.getItem(SESSION_LOG_REVEAL_KEY));
+  } catch {
+    return false;
+  }
+}
+
 export function Sidebar({ role, collapsed }: { role: Role; collapsed: boolean }) {
-  const items = NAV.filter((i) => !i.roles || i.roles.includes(role));
+  const [revealed, setRevealed] = useState(readReveal);
+  const [clicks, setClicks] = useState(0);
+  const items = NAV.filter((i) => !i.hidden || revealed).filter((i) => !i.roles || i.roles.includes(role));
+
+  // Each five-click sequence toggles the hidden surface. The reveal survives
+  // reloads during this login, but logout removes the storage flag.
+  const revealSessionLog = () => {
+    const next = advanceRevealClick(clicks, revealed);
+    setClicks(next.count);
+    if (next.revealed === revealed) return;
+    setRevealed(next.revealed);
+    try {
+      if (next.revealed) localStorage.setItem(SESSION_LOG_REVEAL_KEY, "1");
+      else localStorage.removeItem(SESSION_LOG_REVEAL_KEY);
+    } catch {
+      // Private-mode storage failures must not break the click handler.
+    }
+  };
   return (
     <aside
       className={cn(
@@ -46,7 +77,14 @@ export function Sidebar({ role, collapsed }: { role: Role; collapsed: boolean })
       )}
     >
       <div className="flex items-center gap-3 px-4 py-3.5 border-b border-sidebar-border">
-        <img src={logoUrl} alt="MTI" className="h-9 w-9 shrink-0 rounded-lg object-contain bg-white shadow-sm ring-1 ring-black/10" />
+        <button
+          type="button"
+          onClick={revealSessionLog}
+          aria-label="MTI"
+          className="shrink-0 cursor-default rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <img src={logoUrl} alt="MTI" className="h-9 w-9 rounded-lg object-contain bg-white shadow-sm ring-1 ring-black/10" />
+        </button>
         {!collapsed && (
           <div className="flex flex-col leading-tight">
             <span className="text-[15px] font-bold tracking-tight">MTI</span>

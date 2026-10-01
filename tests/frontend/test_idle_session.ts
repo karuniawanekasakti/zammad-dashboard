@@ -53,7 +53,7 @@ assert.deepEqual([...ACTIVITY_EVENTS], ["mousemove", "keydown", "click", "scroll
   assert.equal(calls.refresh, 0);
 }
 
-// Activity after the window refreshes once; the window restarts from the successful refresh.
+// Activity after the window refreshes once; the window restarts from the refresh attempt.
 {
   const { session, calls, advance } = harness();
   advance(5 * MINUTE);
@@ -85,7 +85,7 @@ assert.deepEqual([...ACTIVITY_EVENTS], ["mousemove", "keydown", "click", "scroll
   await tick();
 }
 
-// A failed refresh is retried on the next activity instead of waiting out the window.
+// A failed refresh is throttled like a successful one: no retry on the next input event.
 {
   const { session, calls, advance } = harness(async () => {
     throw new Error("network");
@@ -95,7 +95,7 @@ assert.deepEqual([...ACTIVITY_EVENTS], ["mousemove", "keydown", "click", "scroll
   await tick();
   session.activity();
   await tick();
-  assert.equal(calls.refresh, 2);
+  assert.equal(calls.refresh, 1);
 }
 
 // Idle fires once, exactly at the limit.

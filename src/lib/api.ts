@@ -64,7 +64,8 @@ import type {
 } from "@/types";
 
 // Simulate network latency
-const delay = <T>(value: T, ms = 200): Promise<T> => new Promise((res) => setTimeout(() => res(value), ms));
+const delay = <T,>(value: T, ms = 200): Promise<T> =>
+  new Promise((res) => setTimeout(() => res(value), ms));
 
 export interface TicketFilters {
   search?: string;
@@ -86,7 +87,10 @@ export interface Scope {
   user_id: string;
 }
 
-function applyScope<T extends { owner_id: string | null; group_id: string }>(rows: T[], scope: Scope): T[] {
+function applyScope<T extends { owner_id: string | null; group_id: string }>(
+  rows: T[],
+  scope: Scope
+): T[] {
   if (scope.role === "admin") return rows;
   if (scope.role === "agent") return rows.filter((r) => r.owner_id === scope.user_id);
   // team_lead + project_manager: limited to their groups
@@ -143,7 +147,7 @@ function applyTicketSorts(rows: Ticket[], sorts?: string, sortBy?: string, sortD
   const parsedSorts = parseJsonList(sorts)
     .map((item) => item as { field?: string; desc?: boolean })
     .filter((item) => item.field && TICKET_FILTER_FIELDS.has(item.field as keyof Ticket));
-  const defaultField = sortBy === "updated" ? "zammad_updated_at" : (sortBy ?? "zammad_updated_at");
+  const defaultField = sortBy === "updated" ? "zammad_updated_at" : sortBy ?? "zammad_updated_at";
   const activeSorts = parsedSorts.length > 0 ? parsedSorts : [{ field: defaultField, desc: sortDir !== "asc" }];
 
   return [...rows].sort((a, b) => {
@@ -185,12 +189,10 @@ export function buildMockSlaMonitor(rows: Ticket[], now = new Date()): SlaMonito
   const enriched = active.map((t) => ({ ...t, actionable_deadline: slaDeadline(t)?.toISOString() ?? null, live_sla_status: slaStatus(t, now), sla_remaining_ms: slaRemainingMs(t, now), sla_progress: slaProgress(t, now) }));
   const closedEnriched = closed.map((t) => ({ ...t, actionable_deadline: slaDeadline(t)?.toISOString() ?? null, live_sla_status: slaStatus(t, now), sla_remaining_ms: slaRemainingMs(t, now), sla_progress: slaProgress(t, now) }));
   const grid = Array.from({ length: 7 }, () => Array(24).fill(0));
-  enriched
-    .filter((t) => t.live_sla_status === "breached")
-    .forEach((t) => {
-      const d = slaDeadline(t) ?? new Date(t.zammad_updated_at);
-      grid[(d.getUTCDay() + 6) % 7][d.getUTCHours()] += 1;
-    });
+  enriched.filter((t) => t.live_sla_status === "breached").forEach((t) => {
+    const d = slaDeadline(t) ?? new Date(t.zammad_updated_at);
+    grid[(d.getUTCDay() + 6) % 7][d.getUTCHours()] += 1;
+  });
   const dayLabels = ["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"];
   const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
   const trend = Array.from({ length: 7 }, (_, i) => {
@@ -206,11 +208,10 @@ export function buildMockSlaMonitor(rows: Ticket[], now = new Date()): SlaMonito
   });
   const rank: Record<LiveSlaStatus, number> = { breached: 0, critical: 1, warning: 2, on_track: 3, safe: 3, no_sla: 4, closed_on_time: 5 };
   enriched.sort((a, b) => rank[a.live_sla_status] - rank[b.live_sla_status] || (a.sla_remaining_ms ?? Infinity) - (b.sla_remaining_ms ?? Infinity));
-  const breachLog = closedEnriched.filter((t) => t.live_sla_status === "breached").sort((a, b) => new Date(b.close_at ?? b.closed_at ?? 0).getTime() - new Date(a.close_at ?? a.closed_at ?? 0).getTime());
-  const avgCloseRows = closed
-    .filter((t) => t.close_at || t.closed_at)
-    .map((t) => t.close_in_min)
-    .filter((n): n is number => n != null);
+  const breachLog = closedEnriched
+    .filter((t) => t.live_sla_status === "breached")
+    .sort((a, b) => new Date(b.close_at ?? b.closed_at ?? 0).getTime() - new Date(a.close_at ?? a.closed_at ?? 0).getTime());
+  const avgCloseRows = closed.filter((t) => t.close_at || t.closed_at).map((t) => t.close_in_min).filter((n): n is number => n != null);
   const summary = {
     ...slaCounts(enriched),
     total_active: active.length,
@@ -220,29 +221,17 @@ export function buildMockSlaMonitor(rows: Ticket[], now = new Date()): SlaMonito
     avg_resolution_mins: avgCloseRows.length ? Math.round(avgCloseRows.reduce((sum, n) => sum + n, 0) / avgCloseRows.length) : null,
   };
   const priorityLabels: Record<TicketPriority, string> = { "very high": "Urgent", high: "High", normal: "Medium", low: "Low", unknown: "Unknown" };
-  const priority_rows = (Object.entries(priorityLabels) as [TicketPriority, string][]).map(([priority, label]) =>
-    slaMonitorRow(
-      priority,
-      label,
-      enriched.filter((t) => t.priority === priority),
-    ),
-  );
+  const priority_rows = (Object.entries(priorityLabels) as [TicketPriority, string][]).map(([priority, label]) => slaMonitorRow(priority, label, enriched.filter((t) => t.priority === priority)));
   const groups = new Map(enriched.map((t) => [t.group_id || "unknown", t.group_name || "Unknown"]));
-  const sla_rows = [...groups]
-    .sort((a, b) => a[0].localeCompare(b[0]))
-    .map(([id, name]) =>
-      slaMonitorRow(
-        id,
-        name,
-        enriched.filter((t) => (t.group_id || "unknown") === id),
-      ),
-    );
+  const sla_rows = [...groups].sort((a, b) => a[0].localeCompare(b[0])).map(([id, name]) => slaMonitorRow(id, name, enriched.filter((t) => (t.group_id || "unknown") === id)));
   // Mock period values exercise each state of the manager header; the real API
   // computes these windows from synchronized tickets.
   const trendByPeriod: Record<ManagerMetricsPeriod, number> = { week: 4, month: 2, quarter: -3, year: 6 };
   const breachesByPeriod: Record<ManagerMetricsPeriod, number> = { week: 6, month: 5, quarter: 3, year: 9 };
   const avgBreachMinutes = (() => {
-    const missed = closed.flatMap((t) => [t.first_response_diff_in_min, t.update_diff_in_min, t.close_diff_in_min]).filter((value): value is number => value != null && value < 0);
+    const missed = closed
+      .flatMap((t) => [t.first_response_diff_in_min, t.update_diff_in_min, t.close_diff_in_min])
+      .filter((value): value is number => value != null && value < 0);
     return missed.length ? Math.round(Math.abs(missed.reduce((sum, n) => sum + n, 0)) / missed.length) : null;
   })();
   const manager_metrics: Record<ManagerMetricsPeriod, SlaManagerMetrics> = {
@@ -271,16 +260,7 @@ export function buildMockSlaMonitor(rows: Ticket[], now = new Date()): SlaMonito
 function overviewBuckets(period: OverviewPeriod, year: number, month?: number, week?: string, day?: string) {
   const now = new Date();
   if (period === "year") {
-    return Array.from({ length: 12 }, (_, i) => ({
-      label: new Date(year, i, 1).toLocaleString("en", { month: "short" }),
-      start: new Date(year, i, 1),
-      end: new Date(year, i + 1, 1),
-      created: 0,
-      closed: 0,
-      open: 0,
-      reopened: 0,
-      backlog: 0,
-    }));
+    return Array.from({ length: 12 }, (_, i) => ({ label: new Date(year, i, 1).toLocaleString("en", { month: "short" }), start: new Date(year, i, 1), end: new Date(year, i + 1, 1), created: 0, closed: 0, open: 0, reopened: 0, backlog: 0 }));
   }
   const selectedMonth = month ? month - 1 : year === now.getFullYear() ? now.getMonth() : 0;
   if (period === "month") {
@@ -302,16 +282,7 @@ function overviewBuckets(period: OverviewPeriod, year: number, month?: number, w
   }
   const selectedDay = day ? new Date(`${day}T00:00:00`) : year === now.getFullYear() ? now : new Date(year, 0, 1);
   selectedDay.setHours(0, 0, 0, 0);
-  return Array.from({ length: 24 }, (_, hour) => ({
-    label: `${String(hour).padStart(2, "0")}:00`,
-    start: new Date(selectedDay.getTime() + hour * 3600000),
-    end: new Date(selectedDay.getTime() + (hour + 1) * 3600000),
-    created: 0,
-    closed: 0,
-    open: 0,
-    reopened: 0,
-    backlog: 0,
-  }));
+  return Array.from({ length: 24 }, (_, hour) => ({ label: `${String(hour).padStart(2, "0")}:00`, start: new Date(selectedDay.getTime() + hour * 3600000), end: new Date(selectedDay.getTime() + (hour + 1) * 3600000), created: 0, closed: 0, open: 0, reopened: 0, backlog: 0 }));
 }
 
 function dateFromWeekInput(value: string) {
@@ -347,7 +318,9 @@ let mockSyncOperation: SyncLastRun | null = null;
 
 /** Data freshness of the mock dataset, by the same rule the backend uses. */
 export function mockFreshness(now = new Date()): SyncFreshness {
-  const staleAfter = mockSettings.last_success_at ? new Date(new Date(mockSettings.last_success_at).getTime() + (mockSettings.schedules.incremental_seconds + 120) * 1000) : null;
+  const staleAfter = mockSettings.last_success_at
+    ? new Date(new Date(mockSettings.last_success_at).getTime() + (mockSettings.schedules.incremental_seconds + 120) * 1000)
+    : null;
   return {
     status: !mockSettings.last_success_at ? "never_synced" : now <= staleAfter! ? "up_to_date" : "out_of_date",
     last_success_at: mockSettings.last_success_at,
@@ -361,8 +334,12 @@ function mockSyncStatus(now: Date) {
   const freshness = mockFreshness(now);
   const worker = { reachable: mockSettings.worker_reachable, workers: [] as string[], snapshot_at: snapshotAt };
   const health = { redis: "ok", database: "ok", zammad: systemSettings.zammad_online ? "ok" : "down", snapshot_at: snapshotAt };
-  const requiredKind = freshness.status === "never_synced" ? ("full" as const) : freshness.status === "out_of_date" ? ("incremental" as const) : null;
-  const blockers = [...(mockSyncOperation ? ["sync_operation_active"] : []), ...(health.zammad !== "ok" ? ["zammad_unavailable"] : []), ...(!worker.reachable ? ["sync_worker_unavailable"] : [])];
+  const requiredKind = freshness.status === "never_synced" ? "full" as const : freshness.status === "out_of_date" ? "incremental" as const : null;
+  const blockers = [
+    ...(mockSyncOperation ? ["sync_operation_active"] : []),
+    ...(health.zammad !== "ok" ? ["zammad_unavailable"] : []),
+    ...(!worker.reachable ? ["sync_worker_unavailable"] : []),
+  ];
   const latestAttempt = mockSettings.last_run;
   let nextEligibleAt: string | null = null;
   if (latestAttempt?.status === "failed" && (latestAttempt.source ?? latestAttempt.triggered_by) === "automatic" && latestAttempt.finished_at) {
@@ -404,15 +381,23 @@ const mockApi = {
   },
 
   // Tickets -----------------------------------------------------------------
-  async listTickets(scope: Scope, filters: TicketFilters = {}): Promise<{ rows: Ticket[]; total: number }> {
+  async listTickets(
+    scope: Scope,
+    filters: TicketFilters = {}
+  ): Promise<{ rows: Ticket[]; total: number }> {
     let rows = applyScope(liveTickets(), scope);
     if (filters.state && filters.state !== "all") rows = rows.filter((t) => t.state === filters.state);
-    if (filters.priority && filters.priority !== "all") rows = rows.filter((t) => t.priority === filters.priority);
-    if (filters.group_id && filters.group_id !== "all") rows = rows.filter((t) => t.group_id === filters.group_id);
-    if (filters.owner_id && filters.owner_id !== "all") rows = rows.filter((t) => t.owner_id === filters.owner_id);
+    if (filters.priority && filters.priority !== "all")
+      rows = rows.filter((t) => t.priority === filters.priority);
+    if (filters.group_id && filters.group_id !== "all")
+      rows = rows.filter((t) => t.group_id === filters.group_id);
+    if (filters.owner_id && filters.owner_id !== "all")
+      rows = rows.filter((t) => t.owner_id === filters.owner_id);
     if (filters.search) {
       const q = filters.search.toLowerCase();
-      rows = rows.filter((t) => t.title.toLowerCase().includes(q) || t.number.includes(q) || t.customer_name.toLowerCase().includes(q));
+      rows = rows.filter(
+        (t) => t.title.toLowerCase().includes(q) || t.number.includes(q) || t.customer_name.toLowerCase().includes(q)
+      );
     }
     rows = applyAdvancedTicketFilters(rows, filters.filters);
     rows = applyTicketSorts(rows, filters.sorts, filters.sort_by, filters.sort_dir);
@@ -439,8 +424,15 @@ const mockApi = {
   },
 
   async listAtRisk(scope: Scope): Promise<Ticket[]> {
-    const rows = applyScope(liveTickets(), scope).filter((t) => t.live_sla_status === "warning" || t.live_sla_status === "critical" || t.live_sla_status === "breached");
-    return delay(rows.sort((a, b) => (a.sla_remaining_ms ?? Infinity) - (b.sla_remaining_ms ?? Infinity)));
+    const rows = applyScope(liveTickets(), scope).filter(
+      (t) => t.live_sla_status === "warning" || t.live_sla_status === "critical" || t.live_sla_status === "breached"
+    );
+    return delay(
+      rows.sort(
+        (a, b) =>
+          (a.sla_remaining_ms ?? Infinity) - (b.sla_remaining_ms ?? Infinity)
+      )
+    );
   },
 
   async listSlaMonitor(scope: Scope, groupId?: string, priority?: TicketPriority | "all"): Promise<SlaMonitorData> {
@@ -460,7 +452,9 @@ const mockApi = {
 
   // KPI / Trends ------------------------------------------------------------
   async kpiSummary(scope: Scope): Promise<KpiSummary> {
-    return delay(kpiSummaryForScope({ role: scope.role, group_ids: scope.group_ids, user_id: scope.user_id }));
+    return delay(
+      kpiSummaryForScope({ role: scope.role, group_ids: scope.group_ids, user_id: scope.user_id })
+    );
   },
 
   async ticketVolumeTrend(days = 30): Promise<TrendPoint[]> {
@@ -481,7 +475,7 @@ const mockApi = {
 
   async getOverview(
     scope: Scope,
-    params: { period: OverviewPeriod; year: number; month?: number; week?: string; day?: string; group_id?: string | "all"; owner_id?: string | "all"; tab?: OverviewTab; page?: number; page_size?: number },
+    params: { period: OverviewPeriod; year: number; month?: number; week?: string; day?: string; group_id?: string | "all"; owner_id?: string | "all"; tab?: OverviewTab; page?: number; page_size?: number }
   ): Promise<OverviewData> {
     const buckets = overviewBuckets(params.period, params.year, params.month, params.week, params.day);
     let scopedTickets = applyScope(liveTickets(), scope);
@@ -604,7 +598,11 @@ const mockApi = {
   },
 
   async listNotifications(): Promise<NotificationEvent[]> {
-    return delay([...notifications].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()));
+    return delay(
+      [...notifications].sort(
+        (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      )
+    );
   },
 
   async markNotificationRead(id: string): Promise<void> {
@@ -635,7 +633,11 @@ const mockApi = {
 
   // Reports -----------------------------------------------------------------
   async listExports(): Promise<ReportExport[]> {
-    return delay([...reportExports].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()));
+    return delay(
+      [...reportExports].sort(
+        (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      )
+    );
   },
 
   async createExport(input: Omit<ReportExport, "id" | "status" | "created_at" | "completed_at" | "expires_at" | "file_size_bytes">): Promise<ReportExport> {
@@ -733,7 +735,7 @@ const mockApi = {
     const now = new Date();
     if (mockSyncOperation?.known_total) {
       const completed = Math.min(mockSyncOperation.known_total, (mockSyncOperation.completed ?? 0) + Math.ceil(mockSyncOperation.known_total / 4));
-      mockSyncOperation = { ...mockSyncOperation, completed, percentage: Math.round((completed * 100) / mockSyncOperation.known_total), processed: { ...mockSyncOperation.processed!, histories: completed } };
+      mockSyncOperation = { ...mockSyncOperation, completed, percentage: Math.round(completed * 100 / mockSyncOperation.known_total), processed: { ...mockSyncOperation.processed!, histories: completed } };
       mockSettings.last_run = mockSyncOperation;
       if (completed === mockSyncOperation.known_total) {
         mockSettings.last_run = { ...mockSyncOperation, status: "succeeded", phase: "finalizing", finished_at: now.toISOString(), duration_secs: 8, completed: undefined, known_total: undefined, percentage: undefined };

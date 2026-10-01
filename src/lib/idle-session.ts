@@ -54,12 +54,8 @@ export function createIdleSession({ refresh, onIdle, shared = NO_SHARED_ACTIVITY
       }
       if (refreshing || at - lastRefreshAt < REFRESH_THROTTLE_MS) return;
       refreshing = true;
+      lastRefreshAt = at;
       refresh()
-        .then(() => {
-          lastRefreshAt = now();
-        })
-        // A failed refresh is retried on the next activity. A 401 is already
-        // handled by the API client, which signs the user out.
         .catch(() => undefined)
         .finally(() => {
           refreshing = false;

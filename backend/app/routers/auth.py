@@ -1,4 +1,5 @@
 """Auth router — JWT login via Zammad proxy auth."""
+import logging
 from datetime import datetime, timezone
 from typing import Annotated
 
@@ -11,6 +12,8 @@ from app.models import AccessSessionOut, ApiResponse, LoginRequest, Role, TokenR
 from app.repositories import create_access_session, upsert_user
 from app.routers.internal import generate_session_id
 from app.zammad_client import zammad
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -152,17 +155,38 @@ async def me(current: Annotated[dict, Depends(get_current_user)]):
 
 
 @router.post("/refresh", response_model=ApiResponse)
-async def refresh(current: Annotated[dict, Depends(get_current_user)]):
-    """Sliding session: reissue a token, with a fresh expiry, from the caller's claims.
+async def refresh(
+    current: Annotated[dict, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Sliding session: reissue a token with a fresh expiry.
 
     `get_current_user` has already rejected an expired or forged token, so an
-    idle session cannot refresh itself back to life. The access-session id (`sid`)
-    is carried over so the refreshed token stays tied to the same login session.
+    idle session cannot refresh itself back to life. The old token only proves
+    *who* the caller is (`sub`) and *which login session* it belongs to (`sid`).
+    Authorization (role, groups, active flag) is re-read from Zammad on every
+    refresh and is never copied from the old token, so revoking a user's role or
+    group access takes effect at the next refresh instead of being extended.
     """
-    token = create_token(
-        current["sub"],
-        Role(current["role"]),
-        current.get("group_ids", []),
-        sid=current.get("sid"),
-    )
+    try:
+        z = await zammad.get_user(int(current["sub"]))
+    except Exception:
+        # Zammad unreachable: do not mint a token we cannot vouch for, but do not
+        # tell the client the user is unauthorized either.
+        logger.exception("refresh: could not load user %s from Zammad", current.get("sub"))
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Unable to verify user right now",
+        )
+
+    if not z or not z.get("active", True):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Inactive or unknown user")
+
+    role = _map_role(z)
+    user = _map_user(z, role)
+    await upsert_user(db, user)
+    # Keep the hot cache in step so /auth/me does not keep serving stale claims.
+    await cache_set(f"user:{user.id}", user.model_dump(mode="json"), ttl=3600)
+
+    token = create_token(user.id, role, user.group_ids, sid=current.get("sid"))
     return ApiResponse(data={"token": token})

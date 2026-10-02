@@ -96,12 +96,6 @@ export const apiClient = {
     return request<User | null>("/auth/me");
   },
 
-  // Sliding session: trade the current bearer token for a freshly issued one.
-  async refreshSession(): Promise<void> {
-    const { token } = await request<{ token: string }>("/auth/refresh", { method: "POST" });
-    useAuth.getState().setToken(token);
-  },
-
   // Tickets
   async listTickets(
     _scope: Scope,

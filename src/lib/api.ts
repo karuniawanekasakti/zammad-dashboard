@@ -375,11 +375,6 @@ const mockApi = {
     return delay(users.find((u) => u.id === userId) ?? null, 80);
   },
 
-  // Mock tokens never expire, so there is nothing to renew.
-  async refreshSession(): Promise<void> {
-    return delay(undefined, 60);
-  },
-
   // Tickets -----------------------------------------------------------------
   async listTickets(
     scope: Scope,

@@ -1,9 +1,9 @@
 import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { api } from "@/lib/api";
 import { ACTIVITY_EVENTS, IDLE_CHECK_INTERVAL_MS, createIdleSession, type SharedActivity } from "@/lib/idle-session";
 import { logoutSessionAndClear } from "@/lib/session-logout";
+import { refreshSessionToken } from "@/lib/session-refresh";
 import { useAuth } from "@/stores/auth";
 
 const SHARED_ACTIVITY_KEY = "zm-last-activity";
@@ -40,7 +40,10 @@ export function useIdleLogout() {
     if (!signedIn) return;
 
     const session = createIdleSession({
-      refresh: () => api.refreshSession(),
+      refresh: () => {
+        const { token, setToken } = useAuth.getState();
+        return refreshSessionToken({ token, setToken });
+      },
       onIdle: () => {
         // Close the access-session on the server (best-effort) before clearing
         // local state. The token is read from the store at the moment of idling,

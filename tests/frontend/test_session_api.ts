@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { refreshSessionToken } from "../../src/lib/session-refresh.ts";
 import { createServer } from "vite";
 
 // The auth store persists to localStorage and the client reads its token back
@@ -23,10 +24,9 @@ try {
   const { users } = (await vite.ssrLoadModule("/src/lib/mock-data.ts")) as typeof import("../../src/lib/mock-data.ts");
 
   // Mock mode: `me` resolves a known user and returns null for an unknown one
-  // (the signal the app uses to sign a stale session out); refresh is a no-op.
+  // (the signal the app uses to sign a stale session out).
   assert.equal((await api.me(users[0].id))?.id, users[0].id);
   assert.equal(await api.me("usr-does-not-exist"), null);
-  assert.equal(await api.refreshSession(), undefined);
 
   // Real client: refresh swaps the bearer token, and later requests use the new one.
   const requests: { url: string; method?: string; authorization?: string }[] = [];
@@ -43,7 +43,7 @@ try {
   }) as typeof fetch;
 
   useAuth.getState().setToken("old-token");
-  await apiClient.refreshSession();
+  await refreshSessionToken({ token: useAuth.getState().token, setToken: useAuth.getState().setToken });
   assert.ok(requests[0].url.endsWith("/auth/refresh"), requests[0].url);
   assert.equal(requests[0].method, "POST");
   assert.equal(requests[0].authorization, "Bearer old-token");

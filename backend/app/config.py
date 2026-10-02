@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     redis_url: str = "redis://redis:6379/0"
     database_url: str = "postgresql+asyncpg://postgres:postgres@db:5432/zammad_dashboard"
     jwt_secret_key: str = "changeme-256bit-secret"
-    jwt_expiry_hours: int = 8
+    jwt_expiry_hours: int = 1
     cors_origins: list[str] = ["http://localhost:5173"]
 
     class Config:

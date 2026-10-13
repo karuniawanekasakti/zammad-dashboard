@@ -5,6 +5,9 @@ namespace, so it never shows up in ``/docs``. Access is still JWT-gated (every
 endpoint depends on ``get_current_user``) — "hidden" is the access control, not
 a role check, matching the client-side-hidden UI.
 
+The one exception is ``/logout``: it accepts a token whose signature is valid
+but whose ``exp`` has passed, so an idle-expired session can still be closed.
+
 Route/event normalization lives in pure helpers so the de-dup rule is testable
 without a database or an HTTP server.
 """
@@ -16,8 +19,11 @@ from typing import Annotated
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from jose import JWTError, jwt
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.deps import get_current_user, get_db, get_redis, revoked_session_key
 from app.models import ActivityEventIn, ApiResponse, SessionActivityOut
 from app.repositories import (
@@ -40,6 +46,10 @@ CLIENT_EVENT_KINDS = frozenset({"view"})
 #: Paths that must never appear in the timeline: the login page (before there is
 #: a session) and the activity page itself (would be self-referential noise).
 EXCLUDED_ROUTES = ("/login", "/session-log")
+
+#: Bearer extractor for /logout only. ``auto_error=False`` so a missing header
+#: becomes our own 401 instead of FastAPI's 403.
+_logout_bearer = HTTPBearer(auto_error=False)
 
 
 def generate_session_id() -> str:
@@ -109,6 +119,31 @@ def is_duplicate_event(kind: str | None, route: str | None, previous: dict | Non
     return kind == previous.get("kind") and route == previous.get("route")
 
 
+def decode_token_allow_expired(token: str | None) -> dict:
+    """Decode a JWT, verifying the signature but NOT the expiry.
+
+    Used only by ``/logout``: an idle session's token has usually expired by the
+    time the client signs out, and the user must still be able to close it. A
+    forged or malformed token is rejected with 401; the worst an old-but-genuine
+    token can do here is close the session it already belongs to.
+    """
+    if not token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    try:
+        return jwt.decode(
+            token,
+            settings.jwt_secret_key,
+            algorithms=["HS256"],
+            options={"verify_exp": False},
+        )
+    except JWTError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+
+
+def is_session_closed(session) -> bool:
+    """True when the access-session row already has a ``logout_at``."""
+    value = session.get("logout_at") if isinstance(session, dict) else getattr(session, "logout_at", None)
+    return value is not None
 
 
 @router.post("/activity", response_model=ApiResponse)
@@ -137,12 +172,22 @@ async def log_activity(
 
 @router.post("/logout", response_model=ApiResponse)
 async def logout(
-    current: Annotated[dict, Depends(get_current_user)],
+    creds: Annotated[HTTPAuthorizationCredentials | None, Depends(_logout_bearer)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    sid = current.get("sid")
+    # Deliberately not `get_current_user`: an idle-expired token must still be
+    # able to close its own session (see `decode_token_allow_expired`).
+    claims = decode_token_allow_expired(creds.credentials if creds else None)
+    sid = claims.get("sid")
     if not sid:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Session required")
+
+    session = await get_access_session(db, sid)
+    # Idempotent: an unknown or already-closed session is a successful logout,
+    # and must not write a second "logout" event or overwrite `logout_at`.
+    if session is None or is_session_closed(session):
+        return ApiResponse(data={"logged_out": True})
+
     await add_session_activity(db, _activity_out(session_id=sid, kind="logout", route=None))
     await close_access_session(db, sid)
     return ApiResponse(data={"logged_out": True})
@@ -190,8 +235,6 @@ async def _cache_revocation(session_id: str) -> None:
     The key's TTL is the configured JWT lifetime — comfortably covering any
     token that could still present this ``sid``.
     """
-    from app.config import settings
-
     ttl = max(1, int(settings.jwt_expiry_hours * 3600))
     try:
         redis = await get_redis()
